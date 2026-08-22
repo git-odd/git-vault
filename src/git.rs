@@ -314,43 +314,47 @@ pub fn commit_and_push_vault(
     run_git_cmd(vault_repo_dir, &["add", "-A"])?;
 
     let status = run_git_cmd(vault_repo_dir, &["status", "--porcelain"])?;
-    if status.trim().is_empty() {
-        return Ok(());
+    if !status.trim().is_empty() {
+        let short_sha = if head_sha.len() >= 7 {
+            &head_sha[..7]
+        } else {
+            head_sha
+        };
+
+        let msg = format!("vault({}): snapshot at {}", project_id, short_sha);
+        run_git_cmd(
+            vault_repo_dir,
+            &[
+                "-c",
+                "user.name=git-vault",
+                "-c",
+                "user.email=vault@local",
+                "commit",
+                "-m",
+                &msg,
+            ],
+        )?;
     }
-
-    let short_sha = if head_sha.len() >= 7 {
-        &head_sha[..7]
-    } else {
-        head_sha
-    };
-
-    let msg = format!("vault({}): snapshot at {}", project_id, short_sha);
-    run_git_cmd(
-        vault_repo_dir,
-        &[
-            "-c",
-            "user.name=git-vault",
-            "-c",
-            "user.email=vault@local",
-            "commit",
-            "-m",
-            &msg,
-        ],
-    )?;
 
     let remotes = run_git_cmd(vault_repo_dir, &["remote"])?;
     if remotes.lines().any(|r| r.trim() == "origin") {
         let push_out = Command::new("git")
             .current_dir(vault_repo_dir)
-            .args(["push"])
+            .args(["push", "-u", "origin", "HEAD"])
             .output()
             .map_err(|e| format!("Failed to push vault to remote: {}", e))?;
 
         if !push_out.status.success() {
             let err = String::from_utf8_lossy(&push_out.stderr);
+            let out = String::from_utf8_lossy(&push_out.stdout);
+            let err_msg = if !err.trim().is_empty() {
+                err.trim()
+            } else {
+                out.trim()
+            };
             return Err(format!(
                 "Failed to push vault to remote: {}\nChanges committed locally in {}",
-                err.trim(),
+                err_msg,
                 vault_repo_dir.display()
             ));
         }
