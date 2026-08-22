@@ -183,8 +183,23 @@ pub fn ensure_exclude_patterns(repo_root: &Path, patterns: &[&str]) -> Result<()
     Ok(())
 }
 
+pub fn ensure_vault_author_identity(vault_repo_dir: &Path) {
+    let has_author = Command::new("git")
+        .current_dir(vault_repo_dir)
+        .args(["config", "user.name"])
+        .output()
+        .map(|o| o.status.success() && !o.stdout.is_empty())
+        .unwrap_or(false);
+
+    if !has_author {
+        let _ = run_git_cmd(vault_repo_dir, &["config", "user.name", "git-vault"]);
+        let _ = run_git_cmd(vault_repo_dir, &["config", "user.email", "vault@local"]);
+    }
+}
+
 pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> Result<(), String> {
     if vault_repo_dir.join(".git").exists() {
+        ensure_vault_author_identity(vault_repo_dir);
         return Ok(());
     }
 
@@ -203,6 +218,7 @@ pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> R
 
         if let Ok(out) = clone_res {
             if out.status.success() {
+                ensure_vault_author_identity(vault_repo_dir);
                 return Ok(());
             }
         }
@@ -212,19 +228,7 @@ pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> R
     fs::create_dir_all(vault_repo_dir)
         .map_err(|e| format!("Failed to create directory {}: {}", vault_repo_dir.display(), e))?;
     run_git_cmd(vault_repo_dir, &["init"])?;
-
-    // Ensure git author identity is set in vault repo if unset globally
-    let has_author = Command::new("git")
-        .current_dir(vault_repo_dir)
-        .args(["config", "user.name"])
-        .output()
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false);
-
-    if !has_author {
-        let _ = run_git_cmd(vault_repo_dir, &["config", "user.name", "git-vault"]);
-        let _ = run_git_cmd(vault_repo_dir, &["config", "user.email", "vault@local"]);
-    }
+    ensure_vault_author_identity(vault_repo_dir);
 
     if let Some(remote) = vault_remote {
         let _ = run_git_cmd(vault_repo_dir, &["remote", "add", "origin", remote]);
@@ -237,6 +241,8 @@ pub fn sync_vault_fetch_rebase(vault_repo_dir: &Path) -> Result<(), String> {
     if !vault_repo_dir.join(".git").exists() {
         return Ok(());
     }
+
+    ensure_vault_author_identity(vault_repo_dir);
 
     let remotes = run_git_cmd(vault_repo_dir, &["remote"])?;
     if !remotes.lines().any(|r| r.trim() == "origin") {
@@ -303,6 +309,8 @@ pub fn commit_and_push_vault(
     project_id: &str,
     head_sha: &str,
 ) -> Result<(), String> {
+    ensure_vault_author_identity(vault_repo_dir);
+
     run_git_cmd(vault_repo_dir, &["add", "-A"])?;
 
     let status = run_git_cmd(vault_repo_dir, &["status", "--porcelain"])?;
@@ -317,7 +325,18 @@ pub fn commit_and_push_vault(
     };
 
     let msg = format!("vault({}): snapshot at {}", project_id, short_sha);
-    run_git_cmd(vault_repo_dir, &["commit", "-m", &msg])?;
+    run_git_cmd(
+        vault_repo_dir,
+        &[
+            "-c",
+            "user.name=git-vault",
+            "-c",
+            "user.email=vault@local",
+            "commit",
+            "-m",
+            &msg,
+        ],
+    )?;
 
     let remotes = run_git_cmd(vault_repo_dir, &["remote"])?;
     if remotes.lines().any(|r| r.trim() == "origin") {
