@@ -70,8 +70,8 @@ Public Worktree: clean
 HEAD:            c045fa260b2b0d471d6327898a4267708b728a6b
 Target Snapshot: c045fa260b2b (exact match)
 Private Assets:  aligned (2 file(s))
-  • SPEC.md
-  • .env
+  • SPEC.md                       (unmodified)
+  • .env                          (unmodified)
 ```
 
 #### 4. Dehydrate (Clean for Open-Source Demos)

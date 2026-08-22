@@ -335,41 +335,87 @@ pub fn cmd_status() -> Result<(), String> {
     };
     println!("Target Snapshot: {}", target_desc);
 
-    let (asset_status, file_count) = if local_files.is_empty() {
-        ("dehydrated", 0)
-    } else if let Some((target_sha, ref manifest, _)) = found_snapshot {
-        let snap_dir = project_snapshots_dir.join(&target_sha);
-        let mut matches = local_files.len() == manifest.files.len();
-        if matches {
-            for f in &local_files {
-                if !manifest.files.contains(f) {
-                    matches = false;
-                    break;
-                }
-                if let (Ok(loc), Ok(tgt)) = (fs::read(repo_root.join(f)), fs::read(snap_dir.join(f))) {
-                    if loc != tgt {
-                        matches = false;
-                        break;
-                    }
+    // Compute detailed per-file status tags
+    let mut all_files = std::collections::BTreeSet::new();
+    for f in &local_files {
+        all_files.insert(f.clone());
+    }
+    if let Some((_, ref manifest, _)) = found_snapshot {
+        for f in &manifest.files {
+            all_files.insert(f.clone());
+        }
+    }
+
+    let mut file_statuses = Vec::new();
+    let mut modified_count = 0;
+    let mut new_count = 0;
+    let mut missing_count = 0;
+
+    for file in &all_files {
+        let is_in_local = local_files.contains(file);
+        let is_in_target = found_snapshot
+            .as_ref()
+            .map(|(_, m, _)| m.files.contains(file))
+            .unwrap_or(false);
+
+        if is_in_local && is_in_target {
+            let (target_sha, _, _) = found_snapshot.as_ref().unwrap();
+            let snap_dir = project_snapshots_dir.join(target_sha);
+            let local_content = fs::read(repo_root.join(file));
+            let target_content = fs::read(snap_dir.join(file));
+
+            if let (Ok(loc), Ok(tgt)) = (local_content, target_content) {
+                if loc == tgt {
+                    file_statuses.push((file.clone(), "unmodified"));
                 } else {
-                    matches = false;
-                    break;
+                    modified_count += 1;
+                    file_statuses.push((file.clone(), "modified"));
                 }
+            } else {
+                modified_count += 1;
+                file_statuses.push((file.clone(), "modified"));
             }
-        }
-        if matches {
-            ("aligned", local_files.len())
+        } else if is_in_local {
+            new_count += 1;
+            file_statuses.push((file.clone(), "new"));
         } else {
-            ("divergent", local_files.len())
+            missing_count += 1;
+            file_statuses.push((file.clone(), "missing locally"));
         }
+    }
+
+    let asset_status_line = if local_files.is_empty() {
+        if let Some((_, ref manifest, _)) = found_snapshot {
+            if manifest.files.is_empty() {
+                "dehydrated (0 files)".to_string()
+            } else {
+                format!("dehydrated (0 in workspace, {} in target snapshot)", manifest.files.len())
+            }
+        } else {
+            "dehydrated (0 files)".to_string()
+        }
+    } else if found_snapshot.is_none() {
+        format!("unanchored ({} new file(s))", local_files.len())
+    } else if modified_count == 0 && new_count == 0 && missing_count == 0 {
+        format!("aligned ({} file(s))", local_files.len())
     } else {
-        ("divergent (unanchored)", local_files.len())
+        let mut parts = Vec::new();
+        if modified_count > 0 {
+            parts.push(format!("{} modified", modified_count));
+        }
+        if new_count > 0 {
+            parts.push(format!("{} new", new_count));
+        }
+        if missing_count > 0 {
+            parts.push(format!("{} missing", missing_count));
+        }
+        format!("divergent ({})", parts.join(", "))
     };
 
-    println!("Private Assets:  {} ({} file(s))", asset_status, file_count);
-    if !local_files.is_empty() {
-        for file in &local_files {
-            println!("  • {}", file);
+    println!("Private Assets:  {}", asset_status_line);
+    if !file_statuses.is_empty() {
+        for (file, tag) in &file_statuses {
+            println!("  • {:<30} ({})", file, tag);
         }
     }
 

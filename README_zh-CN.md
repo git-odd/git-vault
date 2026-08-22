@@ -70,8 +70,8 @@ Public Worktree: clean
 HEAD:            c045fa260b2b0d471d6327898a4267708b728a6b
 Target Snapshot: c045fa260b2b (exact match)
 Private Assets:  aligned (2 file(s))
-  • SPEC.md
-  • .env
+  • SPEC.md                       (unmodified)
+  • .env                          (unmodified)
 ```
 
 #### 4. 一键脱水（开源演示 / 录屏模式）
