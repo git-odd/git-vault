@@ -183,7 +183,38 @@ pub fn ensure_exclude_patterns(repo_root: &Path, patterns: &[&str]) -> Result<()
     Ok(())
 }
 
+pub fn ensure_vault_readme(vault_repo_dir: &Path) {
+    let readme_path = vault_repo_dir.join("README.md");
+    if !readme_path.exists() {
+        let content = r#"# git-vault Storage Backend
+
+> **Note**: This repository is automatically maintained by [git-vault](https://github.com/git-odd/git-vault).
+> Manual editing is generally discouraged, as assets are synchronized and anchored by public Git commit SHAs.
+
+## Storage Structure
+
+```text
+projects/
+└── <host>/<username>/<repo>/
+    └── snapshots/
+        └── <commit_sha>/
+            ├── .vault-manifest.json
+            └── [private assets...]
+```
+
+## Emergency Manual Recovery
+
+If you need to retrieve private files without the `git-vault` CLI:
+1. Navigate to `projects/<host>/<username>/<repo>/snapshots/`.
+2. Locate the folder matching your desired public commit SHA (or its nearest ancestor).
+3. Copy the required private files directly back into your project workspace.
+"#;
+        let _ = fs::write(&readme_path, content);
+    }
+}
+
 pub fn ensure_vault_author_identity(vault_repo_dir: &Path) {
+    ensure_vault_readme(vault_repo_dir);
     let has_author = Command::new("git")
         .current_dir(vault_repo_dir)
         .args(["config", "user.name"])
@@ -200,6 +231,7 @@ pub fn ensure_vault_author_identity(vault_repo_dir: &Path) {
 pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> Result<(), String> {
     if vault_repo_dir.join(".git").exists() {
         ensure_vault_author_identity(vault_repo_dir);
+        ensure_vault_readme(vault_repo_dir);
         return Ok(());
     }
 
