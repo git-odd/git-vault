@@ -4,9 +4,11 @@
 
 ---
 
-**Zero-trace, Git-anchored out-of-band private asset manager for open source developers.**
+**Zero-trace, Git-anchored out-of-band private asset manager & Git Hook automation CLI for open-source developers.**
 
 `git-vault` keeps your private design specs (`SPEC*.md`), roadmaps (`TODO*.md`), AI agent guidelines (`AGENTS*.md`), and local secrets (`.env`) safely stored in a separate, private Git repository, while automatically aligning them with your public repository's commit history.
+
+Featuring `.vaultignore` custom rules and native Git Hooks integration: **Run `git vault init` once, and let regular `git push` & `git checkout` handle synchronization seamlessly in the background!**
 
 Installed as `git-vault`, it works seamlessly as a native Git subcommand: `git vault <command>`.
 
@@ -16,7 +18,13 @@ Installed as `git-vault`, it works seamlessly as a native Git subcommand: `git v
 
 * **Out-of-band Isolation**: Keep public repositories (MIT/AGPL) purely for code. Private specs and credentials live in your personal vault repo—preventing accidental commits, public exposure, and unwanted crawler scraping.
 * **Git-Anchored Time Travel**: The public repository has zero knowledge of the vault. The vault uses the public `HEAD` commit SHA as an anchor. When you check out an older commit, `git-vault` retrieves the corresponding private assets using **first-parent ancestor lookup**.
-* **Zero Local State**: No extra metadata files like `.git/vault-state.json` inside your repository. Private files are invisibly ignored via `.git/info/exclude`.
+* **Zero Friction & Hook Automation**:
+  * Automatically sets up Git lifecycle hooks (`pre-push`, `post-checkout`, `post-merge`) during `init`.
+  * `git push` automatically snapshots and pushes private assets to the vault.
+  * `git checkout` automatically restores aligned private snapshots (with auto-rollback defense if local private edits have conflicts).
+* **Flexible Rules & Zero Local State (.vaultignore & Managed Block)**:
+  * Project-level `.vaultignore` supports full glob and `!` negation rules.
+  * Rules are idempotently synchronized to `.git/info/exclude` via a dedicated Managed Block, keeping public history completely untouched.
 * **Explicit & Robust Contract**:
   * `push` and `pull` strictly require the public repository to be clean (`git diff --quiet` & `git diff --cached --quiet`), ensuring your assets are bound to reproducible commit states.
   * Re-pushing to the same commit SHA cleanly overwrites the slot.
@@ -45,105 +53,63 @@ git vault init git@github.com:yourname/vault.git
 
 This will:
 * Detect project identity from `origin` (e.g. `github.com/alice/my-project`).
+* Generate template `.vaultignore` in the project root (if not present).
 * Verify that no candidate private files are currently tracked by public Git.
-* Register default private patterns in `.git/info/exclude`.
-* Ensure `~/.vault/repo/` is ready.
+* Synchronize patterns to `.git/info/exclude` via Managed Block.
+* Install automated Git hooks (`pre-push`, `post-checkout`, `post-merge`) in `.git/hooks/`.
+* Ensure local vault cache `~/.vault/repo/` is ready.
 
-#### 2. Push Private Assets
+#### 2. Seamless Daily Workflow
 
-Create or edit your private files (`SPEC.md`, `.env`, `docs/private/note.md`), commit your public code, then:
+After initialization, you **don't need to manually run `git vault` commands**:
+1. Edit code and private assets (e.g. `SPEC.md`, `.env`);
+2. Commit public code: `git commit -m "feat: implement feature"`;
+3. Push: `git push origin main` (`pre-push` hook snapshots and syncs private assets to your vault automatically);
+4. Switch branch: `git checkout dev` (`post-checkout` hook pulls and aligns the matching private snapshot).
+
+#### 3. Manual Inspection & Utilities
 
 ```bash
+# Snapshot workspace private assets and push to vault
 git vault push
-```
 
-#### 3. Inspect Status
-
-```bash
+# Inspect repository status, anchor match, and private asset alignment
 git vault status
-```
 
-Example output:
-```text
-Project:         github.com/alice/my-project
-Public Worktree: clean
-HEAD:            c045fa260b2b0d471d6327898a4267708b728a6b
-Target Snapshot: c045fa260b2b (exact match)
-Private Assets:  aligned (2 file(s))
-  • SPEC.md                       (unmodified)
-  • .env                          (unmodified)
-```
-
-#### 4. Dehydrate (Clean for Open-Source Demos)
-
-Before recording a screencast or sharing your screen, purge all private assets from the workspace with a single command:
-
-```bash
+# Dehydrate workspace (delete local private files before public demo/screen recording)
 git vault clean
-```
 
-#### 5. Rehydrate on Any Machine
-
-Clone your public repository on a new machine and pull your private assets in one step:
-
-```bash
-git clone https://github.com/alice/my-project.git
-cd my-project
+# Restore private assets aligned with current HEAD
 git vault pull
+
+# Manage Git hooks
+git vault hook install
+git vault hook uninstall
 ```
 
 ---
 
-### 🔍 Default Tracking Patterns
+### 🔍 Rule Configuration (`.vaultignore`)
 
-`git-vault` automatically manages the following private file patterns:
+`.vaultignore` in your project root follows `.gitignore`-compatible syntax:
 
 ```text
-SPEC*.md          # Design specs and algorithm documentation
-TODO*.md          # Internal roadmaps and task lists
-AGENTS*.md        # AI agent instructions and collaboration guidelines
-.env              # Local environment variables and secrets
-*.local.*         # Local override configuration files
-docs/private/**   # Dedicated private documentation directory
+# Private assets managed by git-vault
+SPEC*.md          # Design specifications
+TODO*.md          # Internal tasks and roadmaps
+AGENTS*.md        # AI collaboration instructions
+.env              # Local environment secrets
+*.local.*         # Machine-specific local config overrides
+docs/private/**   # Dedicated private documentation folder
+
+# Negation rule to un-ignore public files
+!SPEC_public.md
 ```
 
-> **Note**: Public templates like `.env.example`, `.env.sample`, and `.env.template` are explicitly untouched and safe for public commits.
-
----
-
-### 📂 Central Vault Storage Topology
-
-All assets are organized in your private vault repository (`~/.vault/repo/`) under a clean hierarchical structure:
-
-```text
-~/.vault/repo/ (Private Git Repository)
-└── projects/
-    └── <host>/<username>/<repo>/         # e.g., projects/github.com/alice/my-project/
-        └── snapshots/
-            ├── <commit_sha_1>/
-            │   ├── .vault-manifest.json
-            │   ├── .env
-            │   ├── SPEC.md
-            │   └── docs/private/
-            │       └── note.md
-            └── <commit_sha_2>/
-                └── .vault-manifest.json  # {"files": []} (empty snapshot)
-```
-
----
-
-### ⚖️ Comparison with Existing Solutions
-
-| Solution | Mechanism | Why Not? |
-| :--- | :--- | :--- |
-| **`git-crypt` / `transcrypt`** | Encrypts files with GPG, commits ciphertext into public repo. | 1. Public history retains encrypted blobs and size.<br>2. If key leaks later, entire history is exposed.<br>3. Cannot achieve true "zero trace". |
-| **`git submodule` / `subtree`** | Mounts a private repo inside the project. | 1. Leaves `.gitmodules` in repo root.<br>2. Cumbersome branching and detached HEAD issues. |
-| **`git-notes`** | Attaches metadata to Git objects out-of-band. | 1. Intended for small text notes, not multi-file directory trees.<br>2. `refs/notes` do not sync automatically by default. |
-| **`dotenv-vault` / `Doppler`** | Commercial cloud key-value vaults. | 1. KV-only, no support for markdown specs, TODOs, or design docs.<br>2. Requires external SaaS accounts and network APIs. |
-| **`git-vault`** | **Out-of-band Git backend + SHA anchor alignment + Invisible local injection**. | **Zero public footprint, multi-level file trees, automatic time-travel, zero external dependencies.** |
+> **Note**: `.vaultignore` is also backed up inside each vault snapshot for 100% self-healing upon fresh clones or dehydration.
 
 ---
 
 ### 📄 License
 
-MIT License.
+Licensed under the [MIT License](LICENSE).

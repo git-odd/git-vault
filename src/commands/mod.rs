@@ -3,20 +3,27 @@ use std::path::Path;
 
 use crate::config::{get_vault_repo_dir, load_config, save_config};
 use crate::git::{
-    check_tracked_files, commit_and_push_vault, ensure_exclude_patterns, ensure_vault_repo,
-    get_first_parent_ancestors, get_head_sha, get_origin_url, get_repo_root, is_worktree_clean,
-    parse_project_id, sync_vault_fetch_rebase,
+    check_tracked_files, commit_and_push_vault, ensure_vault_repo,
+    get_first_parent_ancestors, get_head_sha, get_origin_url, get_repo_root, install_hooks,
+    is_worktree_clean, parse_project_id, sync_exclude_patterns, sync_vault_fetch_rebase,
+    uninstall_hooks,
 };
 use crate::manifest::VaultManifest;
-use crate::pattern::{scan_matching_files, DEFAULT_PATTERNS};
+use crate::pattern::{
+    ensure_vaultignore_file, load_vault_rules, scan_matching_files, VAULTIGNORE_FILENAME,
+};
 
 pub fn cmd_init(vault_remote: Option<String>) -> Result<(), String> {
     let repo_root = get_repo_root()?;
     let origin_url = get_origin_url(&repo_root)?;
     let project_id = parse_project_id(&origin_url)?;
 
-    // P0 Safety Check: Verify candidate files are not tracked by public Git
-    let candidates = scan_matching_files(&repo_root)?;
+    // 1. Ensure .vaultignore file exists
+    let created_vaultignore = ensure_vaultignore_file(&repo_root)?;
+    let (rules, raw_lines) = load_vault_rules(&repo_root);
+
+    // 2. P0 Safety Check: Verify candidate files are not tracked by public Git
+    let candidates = scan_matching_files(&repo_root, &rules)?;
     let tracked = check_tracked_files(&repo_root, &candidates)?;
     if !tracked.is_empty() {
         let mut msg = String::from("Error: The following candidate private file(s) are already tracked by public Git:\n");
@@ -28,22 +35,31 @@ pub fn cmd_init(vault_remote: Option<String>) -> Result<(), String> {
         return Err(msg);
     }
 
-    // Register patterns into .git/info/exclude
-    ensure_exclude_patterns(&repo_root, DEFAULT_PATTERNS)?;
+    // 3. Register patterns into .git/info/exclude via managed block
+    sync_exclude_patterns(&repo_root, &raw_lines)?;
 
-    // Update global config if remote provided
+    // 4. Install automated Git hooks (pre-push, post-checkout, post-merge)
+    let installed_hooks = install_hooks(&repo_root)?;
+
+    // 5. Update global config if remote provided
     let mut config = load_config()?;
     if let Some(ref remote) = vault_remote {
         config.vault_remote = Some(remote.clone());
         save_config(&config)?;
     }
 
-    // Ensure local vault repo exists
+    // 6. Ensure local vault repo exists
     let vault_repo_dir = get_vault_repo_dir()?;
     ensure_vault_repo(&vault_repo_dir, config.vault_remote.as_deref())?;
 
     println!("Initialized git-vault for project: {}", project_id);
-    println!("Patterns registered in .git/info/exclude.");
+    if created_vaultignore {
+        println!("Created template .vaultignore in repository root.");
+    } else {
+        println!("Loaded patterns from existing .vaultignore.");
+    }
+    println!("Patterns synchronized to .git/info/exclude.");
+    println!("Git hooks installed: {}", installed_hooks.join(", "));
     if let Some(ref remote) = config.vault_remote {
         println!("Vault remote configured: {}", remote);
     }
@@ -63,12 +79,15 @@ pub fn cmd_push() -> Result<(), String> {
         );
     }
 
+    let (rules, raw_lines) = load_vault_rules(&repo_root);
+    sync_exclude_patterns(&repo_root, &raw_lines)?;
+
     let head_sha = get_head_sha(&repo_root)?;
     let origin_url = get_origin_url(&repo_root)?;
     let project_id = parse_project_id(&origin_url)?;
 
     // 2. Check tracked files
-    let candidates = scan_matching_files(&repo_root)?;
+    let candidates = scan_matching_files(&repo_root, &rules)?;
     let tracked = check_tracked_files(&repo_root, &candidates)?;
     if !tracked.is_empty() {
         let mut msg = String::from("Error: The following private file(s) are tracked by public Git:\n");
@@ -99,7 +118,7 @@ pub fn cmd_push() -> Result<(), String> {
     fs::create_dir_all(&snapshot_dir)
         .map_err(|e| format!("Failed to create snapshot directory: {}", e))?;
 
-    // Copy files
+    // Copy private assets
     for file in &candidates {
         let src_path = repo_root.join(file);
         let dest_path = snapshot_dir.join(file);
@@ -111,6 +130,13 @@ pub fn cmd_push() -> Result<(), String> {
         }
         fs::copy(&src_path, &dest_path)
             .map_err(|e| format!("Failed to copy {} to snapshot: {}", file, e))?;
+    }
+
+    // Also snapshot .vaultignore alongside private assets for complete versioning and self-healing
+    let vaultignore_src = repo_root.join(VAULTIGNORE_FILENAME);
+    if vaultignore_src.exists() {
+        let vaultignore_dest = snapshot_dir.join(VAULTIGNORE_FILENAME);
+        let _ = fs::copy(&vaultignore_src, &vaultignore_dest);
     }
 
     // Write manifest
@@ -182,7 +208,9 @@ pub fn cmd_pull() -> Result<(), String> {
     };
 
     let target_snapshot_dir = project_snapshots_dir.join(&target_sha);
-    let local_files = scan_matching_files(&repo_root)?;
+    let (rules, raw_lines) = load_vault_rules(&repo_root);
+    sync_exclude_patterns(&repo_root, &raw_lines)?;
+    let local_files = scan_matching_files(&repo_root, &rules)?;
 
     // 4. Compare and project
     if local_files.is_empty() {
@@ -199,7 +227,16 @@ pub fn cmd_pull() -> Result<(), String> {
             fs::copy(&src_path, &dest_path)
                 .map_err(|e| format!("Failed to copy {} to workspace: {}", file, e))?;
         }
-        ensure_exclude_patterns(&repo_root, DEFAULT_PATTERNS)?;
+
+        // Restore .vaultignore if present in target snapshot and missing locally
+        let snap_vaultignore = target_snapshot_dir.join(VAULTIGNORE_FILENAME);
+        let local_vaultignore = repo_root.join(VAULTIGNORE_FILENAME);
+        if snap_vaultignore.exists() && !local_vaultignore.exists() {
+            let _ = fs::copy(&snap_vaultignore, &local_vaultignore);
+        }
+
+        let (_, updated_lines) = load_vault_rules(&repo_root);
+        sync_exclude_patterns(&repo_root, &updated_lines)?;
 
         let short_sha = if target_sha.len() >= 7 { &target_sha[..7] } else { &target_sha };
         let match_desc = if distance == 0 {
@@ -251,7 +288,9 @@ pub fn cmd_pull() -> Result<(), String> {
 
 pub fn cmd_clean() -> Result<(), String> {
     let repo_root = get_repo_root()?;
-    let local_files = scan_matching_files(&repo_root)?;
+    let (rules, raw_lines) = load_vault_rules(&repo_root);
+    sync_exclude_patterns(&repo_root, &raw_lines)?;
+    let local_files = scan_matching_files(&repo_root, &rules)?;
 
     if local_files.is_empty() {
         println!("Working tree is already dehydrated (0 private files).");
@@ -303,6 +342,9 @@ pub fn cmd_status() -> Result<(), String> {
     let origin_url = get_origin_url(&repo_root).unwrap_or_else(|_| "unknown".to_string());
     let project_id = parse_project_id(&origin_url).unwrap_or_else(|_| "unknown".to_string());
 
+    let (rules, raw_lines) = load_vault_rules(&repo_root);
+    let _ = sync_exclude_patterns(&repo_root, &raw_lines);
+
     let vault_repo_dir = get_vault_repo_dir()?;
     let ancestors = get_first_parent_ancestors(&repo_root).unwrap_or_default();
     let mut found_snapshot: Option<(String, VaultManifest, usize)> = None;
@@ -322,7 +364,7 @@ pub fn cmd_status() -> Result<(), String> {
         }
     }
 
-    let local_files = scan_matching_files(&repo_root)?;
+    let local_files = scan_matching_files(&repo_root, &rules)?;
 
     println!("Project:         {}", project_id);
     println!("Public Worktree: {}", if is_clean { "clean" } else { "dirty (uncommitted changes present)" });
@@ -419,5 +461,23 @@ pub fn cmd_status() -> Result<(), String> {
         }
     }
 
+    Ok(())
+}
+
+pub fn cmd_hook_install() -> Result<(), String> {
+    let repo_root = get_repo_root()?;
+    let installed = install_hooks(&repo_root)?;
+    println!("Successfully installed git-vault hooks: {}", installed.join(", "));
+    Ok(())
+}
+
+pub fn cmd_hook_uninstall() -> Result<(), String> {
+    let repo_root = get_repo_root()?;
+    let uninstalled = uninstall_hooks(&repo_root)?;
+    if uninstalled.is_empty() {
+        println!("No git-vault hooks found to uninstall.");
+    } else {
+        println!("Successfully uninstalled git-vault hooks: {}", uninstalled.join(", "));
+    }
     Ok(())
 }

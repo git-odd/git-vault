@@ -89,11 +89,16 @@ fn test_full_lifecycle_flow() {
     let (ok, out, err) = env.run_vault(&["init"]);
     assert!(ok, "init failed: stdout={}, stderr={}", out, err);
     assert!(out.contains("Initialized git-vault for project: github.com/alice/demo-project"));
+    assert!(out.contains("Created template .vaultignore"));
+    assert!(out.contains("Git hooks installed"));
 
-    // Check .git/info/exclude
+    // Check .vaultignore and .git/info/exclude
+    assert!(env.public_repo.join(".vaultignore").exists());
     let exclude = fs::read_to_string(env.public_repo.join(".git/info/exclude")).unwrap();
+    assert!(exclude.contains("# >>> git-vault managed patterns >>>"));
     assert!(exclude.contains(".env"));
     assert!(exclude.contains("SPEC*.md"));
+    assert!(exclude.contains("# <<< git-vault managed patterns <<<"));
 
     // 3. Create private assets
     fs::write(env.public_repo.join("SPEC.md"), "# Architecture Spec").unwrap();
@@ -209,4 +214,83 @@ fn test_tracked_file_rejection_on_init() {
     assert!(!ok);
     assert!(err.contains("already tracked by public Git"));
     assert!(err.contains(".env"));
+}
+
+#[test]
+fn test_custom_vaultignore_and_negation() {
+    let env = TestEnv::new("custom_vaultignore");
+
+    fs::write(env.public_repo.join("main.rs"), "fn main() {}").unwrap();
+    run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
+    run_cmd(&env.public_repo, "git", &["commit", "-m", "init"], &[]);
+    env.run_vault(&["init"]);
+
+    // Write custom rules into .vaultignore
+    let custom_rules = r#"
+# Custom ignore rules
+*.secret
+SPEC*.md
+!SPEC_public.md
+"#;
+    fs::write(env.public_repo.join(".vaultignore"), custom_rules).unwrap();
+
+    // Create candidate files
+    fs::write(env.public_repo.join("api.secret"), "SECRET_TOKEN").unwrap();
+    fs::write(env.public_repo.join("SPEC_private.md"), "Private Spec").unwrap();
+    fs::write(env.public_repo.join("SPEC_public.md"), "Public Spec").unwrap();
+
+    // Check status
+    let (ok, out, _) = env.run_vault(&["status"]);
+    assert!(ok);
+    assert!(out.contains("api.secret"));
+    assert!(out.contains("SPEC_private.md"));
+    assert!(!out.contains("SPEC_public.md")); // Negated, so not considered private
+
+    // Push snapshot
+    let (ok, out, _) = env.run_vault(&["push"]);
+    assert!(ok);
+    assert!(out.contains("2 private files")); // api.secret, SPEC_private.md
+
+    // Clean
+    env.run_vault(&["clean"]);
+    assert!(!env.public_repo.join("api.secret").exists());
+    assert!(!env.public_repo.join("SPEC_private.md").exists());
+    assert!(env.public_repo.join("SPEC_public.md").exists()); // Must still exist
+
+    // Pull
+    let (ok, _, _) = env.run_vault(&["pull"]);
+    assert!(ok);
+    assert!(env.public_repo.join("api.secret").exists());
+    assert!(env.public_repo.join("SPEC_private.md").exists());
+}
+
+#[test]
+fn test_hook_installation_and_lifecycle() {
+    let env = TestEnv::new("hook_lifecycle");
+
+    fs::write(env.public_repo.join("main.rs"), "fn main() {}").unwrap();
+    run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
+    run_cmd(&env.public_repo, "git", &["commit", "-m", "init"], &[]);
+    env.run_vault(&["init"]);
+
+    let hooks_dir = env.public_repo.join(".git/hooks");
+    assert!(hooks_dir.join("pre-push").exists());
+    assert!(hooks_dir.join("post-checkout").exists());
+    assert!(hooks_dir.join("post-merge").exists());
+
+    // Test uninstall
+    let (ok, out, _) = env.run_vault(&["hook", "uninstall"]);
+    assert!(ok);
+    assert!(out.contains("Successfully uninstalled"));
+    assert!(!hooks_dir.join("pre-push").exists());
+    assert!(!hooks_dir.join("post-checkout").exists());
+    assert!(!hooks_dir.join("post-merge").exists());
+
+    // Test reinstall
+    let (ok, out, _) = env.run_vault(&["hook", "install"]);
+    assert!(ok);
+    assert!(out.contains("Successfully installed"));
+    assert!(hooks_dir.join("pre-push").exists());
+    assert!(hooks_dir.join("post-checkout").exists());
+    assert!(hooks_dir.join("post-merge").exists());
 }
