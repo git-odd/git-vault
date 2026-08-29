@@ -294,3 +294,99 @@ fn test_hook_installation_and_lifecycle() {
     assert!(hooks_dir.join("post-checkout").exists());
     assert!(hooks_dir.join("post-merge").exists());
 }
+
+#[test]
+fn test_diff_lifecycle_and_flags() {
+    let env = TestEnv::new("diff_lifecycle");
+
+    // 1. Initial setup
+    fs::write(env.public_repo.join("main.rs"), "fn main() {}").unwrap();
+    run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
+    run_cmd(&env.public_repo, "git", &["commit", "-m", "init"], &[]);
+    env.run_vault(&["init"]);
+
+    // 2. Create private assets & push snapshot 1
+    fs::write(env.public_repo.join("SPEC.md"), "# Original Spec\nLine 1\nLine 2\n").unwrap();
+    fs::write(env.public_repo.join(".env"), "SECRET=initial\n").unwrap();
+    let (ok, _, _) = env.run_vault(&["push"]);
+    assert!(ok);
+
+    // 3. When aligned, diff should be completely silent
+    let (ok, out, _) = env.run_vault(&["diff", "--no-pager"]);
+    assert!(ok);
+    assert_eq!(out.trim(), "");
+
+    // 4. Modify SPEC.md, add TODO.md, delete .env
+    fs::write(env.public_repo.join("SPEC.md"), "# Original Spec\nLine 1 Modified\nLine 2\nLine 3 Added\n").unwrap();
+    fs::write(env.public_repo.join("TODO.md"), "# TODO\n- Item 1\n").unwrap();
+    fs::remove_file(env.public_repo.join(".env")).unwrap();
+
+    // 5. Test raw unified diff output
+    let (ok, out, _) = env.run_vault(&["diff", "--no-pager"]);
+    assert!(ok);
+    assert!(out.contains("diff --git a/SPEC.md b/SPEC.md"));
+    assert!(out.contains("+Line 1 Modified"));
+    assert!(out.contains("-Line 1"));
+    assert!(out.contains("diff --git a/TODO.md b/TODO.md"));
+    assert!(out.contains("new file mode 100644"));
+    assert!(out.contains("diff --git a/.env b/.env"));
+    assert!(out.contains("deleted file mode 100644"));
+
+    // 6. Test --name-only
+    let (ok, out, _) = env.run_vault(&["diff", "--name-only"]);
+    assert!(ok);
+    assert!(out.contains("SPEC.md"));
+    assert!(out.contains("TODO.md"));
+    assert!(out.contains(".env"));
+
+    // 7. Test --name-status
+    let (ok, out, _) = env.run_vault(&["diff", "--name-status"]);
+    assert!(ok);
+    assert!(out.contains("M\tSPEC.md"));
+    assert!(out.contains("A\tTODO.md"));
+    assert!(out.contains("D\t.env"));
+
+    // 8. Test --stat
+    let (ok, out, _) = env.run_vault(&["diff", "--stat"]);
+    assert!(ok);
+    assert!(out.contains("SPEC.md"));
+    assert!(out.contains("TODO.md"));
+    assert!(out.contains(".env"));
+    assert!(out.contains("changed"));
+
+    // 9. Test path filtering
+    let (ok, out, _) = env.run_vault(&["diff", "--no-pager", "SPEC.md"]);
+    assert!(ok);
+    assert!(out.contains("SPEC.md"));
+    assert!(!out.contains("TODO.md"));
+    assert!(!out.contains(".env"));
+}
+
+#[test]
+fn test_diff_between_two_snapshots() {
+    let env = TestEnv::new("diff_two_snapshots");
+
+    // Commit 1
+    fs::write(env.public_repo.join("main.rs"), "fn main() {}").unwrap();
+    run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
+    run_cmd(&env.public_repo, "git", &["commit", "-m", "commit 1"], &[]);
+    env.run_vault(&["init"]);
+
+    fs::write(env.public_repo.join("SPEC.md"), "Version 1\n").unwrap();
+    env.run_vault(&["push"]);
+
+    // Commit 2
+    fs::write(env.public_repo.join("main.rs"), "fn main() { println!(\"v2\"); }").unwrap();
+    run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
+    run_cmd(&env.public_repo, "git", &["commit", "-m", "commit 2"], &[]);
+
+    fs::write(env.public_repo.join("SPEC.md"), "Version 2\n").unwrap();
+    env.run_vault(&["push"]);
+
+    // Diff HEAD~1 HEAD
+    let (ok, out, _) = env.run_vault(&["diff", "--no-pager", "HEAD~1", "HEAD"]);
+    assert!(ok);
+    assert!(out.contains("diff --git a/SPEC.md b/SPEC.md"));
+    assert!(out.contains("-Version 1"));
+    assert!(out.contains("+Version 2"));
+}

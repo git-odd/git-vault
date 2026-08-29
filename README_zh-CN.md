@@ -84,6 +84,15 @@ git vault clean
 # 重新拉取并复水当前分支对应的私有资产
 git vault pull
 
+# 查看私有资产行级差异（自动调用 delta 语法高亮）
+git vault diff
+git vault diff -s             # 强制开启双栏对比
+git vault diff -P             # 免分页直接输出至终端（无需按回车，直接滚轮翻看）
+git vault diff -s -P          # 双栏且免分页直接输出
+git vault diff --stat         # 仅查看文件变更与行数统计
+git vault diff HEAD~1         # 与指定历史提交快照对比
+git vault diff SPEC.md        # 仅对比指定文件或路径
+
 # 手动管理 Git 钩子
 git vault hook install
 git vault hook uninstall

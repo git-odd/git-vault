@@ -107,6 +107,65 @@ enum Commands {
     )]
     Status,
 
+    /// Show changes between workspace private assets and vault snapshot
+    #[command(
+        about = "Show changes between workspace private assets and vault snapshot",
+        long_about = "Compares workspace private assets against the target vault snapshot,\n\
+                      or compares two historical vault snapshots.\n\n\
+                      INTEGRATIONS & VIEWS:\n\
+                      - Automatically pipes to 'delta --side-by-side' if delta is available.\n\
+                      - Supports --stat, --name-only, --name-status, and path filtering."
+    )]
+    Diff {
+        /// Optional target commit/revision to compare against (e.g. HEAD, HEAD~1, main)
+        #[arg(value_name = "REVISION")]
+        revision: Option<String>,
+
+        /// Optional second revision to compare two historical snapshots (e.g. rev_a rev_b)
+        #[arg(value_name = "REVISION_B")]
+        revision_b: Option<String>,
+
+        /// Force side-by-side diff view via delta
+        #[arg(short = 's', long = "side-by-side")]
+        side_by_side: bool,
+
+        /// Force unified diff view
+        #[arg(short = 'u', long = "unified")]
+        unified: bool,
+
+        /// Output only file change statistics (insertions/deletions)
+        #[arg(long = "stat")]
+        stat: bool,
+
+        /// Show only names of changed files
+        #[arg(long = "name-only")]
+        name_only: bool,
+
+        /// Show only names and status (M/A/D) of changed files
+        #[arg(long = "name-status")]
+        name_status: bool,
+
+        /// Do not pipe output into a pager / delta
+        #[arg(long = "no-pager")]
+        no_pager: bool,
+
+        /// Disable interactive paging and print directly to terminal scrollback (same as --paging=never)
+        #[arg(short = 'P', long = "no-paging")]
+        no_paging: bool,
+
+        /// Control paging mode (auto, always, never)
+        #[arg(long = "paging", value_name = "WHEN")]
+        paging: Option<String>,
+
+        /// Control color output (auto, always, never)
+        #[arg(long = "color", value_name = "WHEN")]
+        color: Option<String>,
+
+        /// Optional path filters
+        #[arg(last = true, value_name = "PATH")]
+        paths: Vec<String>,
+    },
+
     /// Manage automated Git lifecycle hooks (pre-push, post-checkout, post-merge)
     #[command(
         about = "Manage automated Git hooks for git-vault",
@@ -137,6 +196,33 @@ fn main() {
         Commands::Pull => commands::cmd_pull(),
         Commands::Clean => commands::cmd_clean(),
         Commands::Status => commands::cmd_status(),
+        Commands::Diff {
+            revision,
+            revision_b,
+            side_by_side,
+            unified,
+            stat,
+            name_only,
+            name_status,
+            no_pager,
+            no_paging,
+            paging,
+            color,
+            paths,
+        } => commands::cmd_diff(
+            revision,
+            revision_b,
+            paths,
+            side_by_side,
+            unified,
+            stat,
+            name_only,
+            name_status,
+            no_pager,
+            no_paging,
+            paging,
+            color,
+        ),
         Commands::Hook { action } => match action {
             HookAction::Install => commands::cmd_hook_install(),
             HookAction::Uninstall => commands::cmd_hook_uninstall(),

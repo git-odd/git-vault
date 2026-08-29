@@ -82,6 +82,15 @@ git vault clean
 # Restore private assets aligned with current HEAD
 git vault pull
 
+# View line-by-line diff of private assets (integrated with delta syntax highlight)
+git vault diff
+git vault diff -s             # Force side-by-side view
+git vault diff -P             # Direct scroll (disable paging, mouse wheel scroll)
+git vault diff -s -P          # Side-by-side without interactive pager
+git vault diff --stat         # Output diffstat summary
+git vault diff HEAD~1         # Diff against specific commit snapshot
+git vault diff SPEC.md        # Filter by path
+
 # Manage Git hooks
 git vault hook install
 git vault hook uninstall

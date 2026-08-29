@@ -3,10 +3,11 @@ use std::path::Path;
 
 use crate::config::{get_vault_repo_dir, load_config, save_config};
 use crate::git::{
-    check_tracked_files, commit_and_push_vault, ensure_vault_repo,
-    get_first_parent_ancestors, get_head_sha, get_origin_url, get_repo_root, install_hooks,
-    is_worktree_clean, parse_project_id, sync_exclude_patterns, sync_vault_fetch_rebase,
-    uninstall_hooks,
+    calculate_diff_stat, check_tracked_files, commit_and_push_vault, ensure_vault_repo,
+    format_diff_stat_summary, generate_file_diff, get_first_parent_ancestors, get_head_sha,
+    get_origin_url, get_repo_root, install_hooks, is_worktree_clean, output_diff_text,
+    parse_project_id, resolve_commit_sha, run_git_cmd, sync_exclude_patterns,
+    sync_vault_fetch_rebase, uninstall_hooks, DiffFileStat,
 };
 use crate::manifest::VaultManifest;
 use crate::pattern::{
@@ -479,5 +480,237 @@ pub fn cmd_hook_uninstall() -> Result<(), String> {
     } else {
         println!("Successfully uninstalled git-vault hooks: {}", uninstalled.join(", "));
     }
+    Ok(())
+}
+
+pub fn cmd_diff(
+    revision: Option<String>,
+    revision_b: Option<String>,
+    mut paths: Vec<String>,
+    side_by_side: bool,
+    unified: bool,
+    stat: bool,
+    name_only: bool,
+    name_status: bool,
+    no_pager: bool,
+    no_paging: bool,
+    paging: Option<String>,
+    _color: Option<String>,
+) -> Result<(), String> {
+    let repo_root = get_repo_root()?;
+    let origin_url = get_origin_url(&repo_root)?;
+    let project_id = parse_project_id(&origin_url)?;
+
+    let config = load_config()?;
+    let vault_repo_dir = get_vault_repo_dir()?;
+    ensure_vault_repo(&vault_repo_dir, config.vault_remote.as_deref())?;
+    sync_vault_fetch_rebase(&vault_repo_dir)?;
+
+    let project_snapshots_dir = vault_repo_dir
+        .join("projects")
+        .join(&project_id)
+        .join("snapshots");
+
+    let mut target_rev_a: Option<String> = None;
+    let mut target_rev_b: Option<String> = None;
+
+    if let (Some(ref r_a), Some(ref r_b)) = (&revision, &revision_b) {
+        let res_a = resolve_commit_sha(&repo_root, r_a);
+        let res_b = resolve_commit_sha(&repo_root, r_b);
+        match (res_a, res_b) {
+            (Ok(sha_a), Ok(sha_b)) => {
+                target_rev_a = Some(sha_a);
+                target_rev_b = Some(sha_b);
+            }
+            (Ok(sha_a), Err(_)) => {
+                target_rev_a = Some(sha_a);
+                paths.push(r_b.clone());
+            }
+            (Err(_), Ok(sha_b)) => {
+                target_rev_a = Some(sha_b);
+                paths.push(r_a.clone());
+            }
+            (Err(_), Err(_)) => {
+                paths.push(r_a.clone());
+                paths.push(r_b.clone());
+            }
+        }
+    } else if let Some(ref r_a) = revision {
+        match resolve_commit_sha(&repo_root, r_a) {
+            Ok(sha_a) => {
+                target_rev_a = Some(sha_a);
+            }
+            Err(_) => {
+                paths.push(r_a.clone());
+            }
+        }
+    }
+
+    let mut file_pairs = Vec::new();
+
+    if let (Some(sha_a), Some(sha_b)) = (&target_rev_a, &target_rev_b) {
+        let snap_dir_a = project_snapshots_dir.join(sha_a);
+        let snap_dir_b = project_snapshots_dir.join(sha_b);
+
+        if !snap_dir_a.exists() {
+            return Err(format!("Snapshot for revision '{}' ({}) not found in vault.", revision.unwrap_or_default(), &sha_a[..std::cmp::min(7, sha_a.len())]));
+        }
+        if !snap_dir_b.exists() {
+            return Err(format!("Snapshot for revision '{}' ({}) not found in vault.", revision_b.unwrap_or_default(), &sha_b[..std::cmp::min(7, sha_b.len())]));
+        }
+
+        let manifest_a = VaultManifest::load_from_dir(&snap_dir_a).unwrap_or_else(|_| VaultManifest::new(sha_a.clone(), Vec::new()));
+        let manifest_b = VaultManifest::load_from_dir(&snap_dir_b).unwrap_or_else(|_| VaultManifest::new(sha_b.clone(), Vec::new()));
+
+        let mut all_files = std::collections::BTreeSet::new();
+        for f in &manifest_a.files {
+            all_files.insert(f.clone());
+        }
+        for f in &manifest_b.files {
+            all_files.insert(f.clone());
+        }
+        if snap_dir_a.join(VAULTIGNORE_FILENAME).exists() || snap_dir_b.join(VAULTIGNORE_FILENAME).exists() {
+            all_files.insert(VAULTIGNORE_FILENAME.to_string());
+        }
+
+        for file in all_files {
+            let old_path = if snap_dir_a.join(&file).exists() { Some(snap_dir_a.join(&file)) } else { None };
+            let new_path = if snap_dir_b.join(&file).exists() { Some(snap_dir_b.join(&file)) } else { None };
+            file_pairs.push((file, old_path, new_path));
+        }
+    } else {
+        let found_snapshot = if let Some(ref sha) = target_rev_a {
+            let output = run_git_cmd(&repo_root, &["rev-list", "--first-parent", sha])
+                .map_err(|e| format!("Failed to resolve first-parent list for '{}': {}", sha, e))?;
+            let ancestors: Vec<String> = output.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            let mut snap = None;
+            for (dist, ancestor_sha) in ancestors.iter().enumerate() {
+                let snap_dir = project_snapshots_dir.join(ancestor_sha);
+                if snap_dir.join(".vault-manifest.json").exists() {
+                    if let Ok(m) = VaultManifest::load_from_dir(&snap_dir) {
+                        snap = Some((ancestor_sha.clone(), m, dist));
+                        break;
+                    }
+                }
+            }
+            snap
+        } else {
+            let ancestors = get_first_parent_ancestors(&repo_root).unwrap_or_default();
+            let mut snap = None;
+            for (dist, sha) in ancestors.iter().enumerate() {
+                let snap_dir = project_snapshots_dir.join(sha);
+                if snap_dir.join(".vault-manifest.json").exists() {
+                    if let Ok(m) = VaultManifest::load_from_dir(&snap_dir) {
+                        snap = Some((sha.clone(), m, dist));
+                        break;
+                    }
+                }
+            }
+            snap
+        };
+
+        let (rules, raw_lines) = load_vault_rules(&repo_root);
+        let _ = sync_exclude_patterns(&repo_root, &raw_lines);
+        let local_files = scan_matching_files(&repo_root, &rules)?;
+
+        let mut all_files = std::collections::BTreeSet::new();
+        for f in &local_files {
+            all_files.insert(f.clone());
+        }
+        if let Some((_, ref manifest, _)) = found_snapshot {
+            for f in &manifest.files {
+                all_files.insert(f.clone());
+            }
+        }
+        let local_vaultignore = repo_root.join(VAULTIGNORE_FILENAME);
+        let snap_vaultignore = found_snapshot.as_ref().map(|(sha, _, _)| project_snapshots_dir.join(sha).join(VAULTIGNORE_FILENAME));
+        if local_vaultignore.exists() || snap_vaultignore.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            all_files.insert(VAULTIGNORE_FILENAME.to_string());
+        }
+
+        for file in all_files {
+            let old_path = if let Some((ref target_sha, _, _)) = found_snapshot {
+                let p = project_snapshots_dir.join(target_sha).join(&file);
+                if p.exists() { Some(p) } else { None }
+            } else {
+                None
+            };
+            let new_path = {
+                let p = repo_root.join(&file);
+                if p.exists() { Some(p) } else { None }
+            };
+            file_pairs.push((file, old_path, new_path));
+        }
+    }
+
+    if !paths.is_empty() {
+        let normalized_filters: Vec<String> = paths.iter().map(|p| p.replace('\\', "/").trim_end_matches('/').to_string()).collect();
+        file_pairs.retain(|(file, _, _)| {
+            let norm_file = file.replace('\\', "/");
+            normalized_filters.iter().any(|filter| {
+                norm_file == *filter || norm_file.starts_with(&format!("{}/", filter))
+            })
+        });
+    }
+
+    let mut diff_results = Vec::new();
+    for (rel_path, old_path, new_path) in file_pairs {
+        if let Ok(Some(diff_content)) = generate_file_diff(&rel_path, old_path.as_deref(), new_path.as_deref()) {
+            let status_tag = match (old_path.is_some(), new_path.is_some()) {
+                (true, true) => "M",
+                (false, true) => "A",
+                (true, false) => "D",
+                (false, false) => "M",
+            };
+            let stat = calculate_diff_stat(&diff_content, &rel_path);
+            diff_results.push((rel_path, diff_content, status_tag, stat));
+        }
+    }
+
+    if diff_results.is_empty() {
+        return Ok(());
+    }
+
+    if name_only {
+        for (rel_path, _, _, _) in &diff_results {
+            println!("{}", rel_path);
+        }
+        return Ok(());
+    }
+
+    if name_status {
+        for (rel_path, _, tag, _) in &diff_results {
+            println!("{}\t{}", tag, rel_path);
+        }
+        return Ok(());
+    }
+
+    if stat {
+        let stats: Vec<DiffFileStat> = diff_results.iter().map(|(_, _, _, s)| s.clone()).collect();
+        let stat_text = format_diff_stat_summary(&stats);
+        print!("{}", stat_text);
+        return Ok(());
+    }
+
+    let mut combined_diff = String::new();
+    for (_, diff_content, _, _) in diff_results {
+        combined_diff.push_str(&diff_content);
+        if !diff_content.ends_with('\n') {
+            combined_diff.push('\n');
+        }
+    }
+
+    output_diff_text(
+        &combined_diff,
+        side_by_side,
+        unified,
+        no_pager,
+        no_paging,
+        paging.as_deref(),
+        config.diff_side_by_side,
+        config.diff_pager.as_deref(),
+        config.diff_paging.as_deref(),
+    )?;
+
     Ok(())
 }

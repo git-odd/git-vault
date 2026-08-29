@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 pub struct VaultConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vault_remote: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_side_by_side: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_pager: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diff_paging: Option<String>,
 }
 
 pub fn get_vault_home() -> Result<PathBuf, String> {

@@ -141,6 +141,334 @@ pub fn check_tracked_files(repo_root: &Path, candidates: &[String]) -> Result<Ve
     Ok(tracked)
 }
 
+pub fn resolve_commit_sha(repo_root: &Path, rev: &str) -> Result<String, String> {
+    run_git_cmd(repo_root, &["rev-parse", "--verify", rev])
+        .map_err(|_| format!("Unknown revision or commit: '{}'", rev))
+}
+
+pub fn is_command_in_path(cmd: &str) -> bool {
+    let check_cmd = if cfg!(windows) { "where" } else { "which" };
+    Command::new(check_cmd)
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub fn generate_file_diff(
+    rel_path: &str,
+    old_file: Option<&Path>,
+    new_file: Option<&Path>,
+) -> Result<Option<String>, String> {
+    let null_target = "/dev/null";
+
+    let (old_arg, new_arg, mode) = match (old_file, new_file) {
+        (Some(old_p), Some(new_p)) => (old_p.to_str().unwrap_or(""), new_p.to_str().unwrap_or(""), "modified"),
+        (None, Some(new_p)) => (null_target, new_p.to_str().unwrap_or(""), "new"),
+        (Some(old_p), None) => (old_p.to_str().unwrap_or(""), null_target, "deleted"),
+        (None, None) => return Ok(None),
+    };
+
+    let output = Command::new("git")
+        .args(["diff", "--no-index", "--color=never", "--", old_arg, new_arg])
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let norm_path = rel_path.replace('\\', "/");
+
+    // Format header
+    let hunk_start_idx = stdout.find("@@").or_else(|| stdout.find("Binary files"));
+    let hunks = match hunk_start_idx {
+        Some(idx) => &stdout[idx..],
+        None => stdout.as_ref(),
+    };
+
+    let formatted_diff = match mode {
+        "new" => format!(
+            "diff --git a/{rel} b/{rel}\nnew file mode 100644\n--- /dev/null\n+++ b/{rel}\n{}",
+            hunks,
+            rel = norm_path
+        ),
+        "deleted" => format!(
+            "diff --git a/{rel} b/{rel}\ndeleted file mode 100644\n--- a/{rel}\n+++ /dev/null\n{}",
+            hunks,
+            rel = norm_path
+        ),
+        _ => format!(
+            "diff --git a/{rel} b/{rel}\n--- a/{rel}\n+++ b/{rel}\n{}",
+            hunks,
+            rel = norm_path
+        ),
+    };
+
+    Ok(Some(formatted_diff))
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffFileStat {
+    pub file_path: String,
+    pub insertions: usize,
+    pub deletions: usize,
+    pub is_binary: bool,
+}
+
+pub fn calculate_diff_stat(diff_text: &str, file_path: &str) -> DiffFileStat {
+    if diff_text.contains("Binary files") {
+        return DiffFileStat {
+            file_path: file_path.to_string(),
+            insertions: 0,
+            deletions: 0,
+            is_binary: true,
+        };
+    }
+
+    let mut insertions = 0;
+    let mut deletions = 0;
+    let mut in_hunk = false;
+
+    for line in diff_text.lines() {
+        if line.starts_with("@@ ") {
+            in_hunk = true;
+            continue;
+        }
+        if in_hunk {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                insertions += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                deletions += 1;
+            }
+        }
+    }
+
+    DiffFileStat {
+        file_path: file_path.to_string(),
+        insertions,
+        deletions,
+        is_binary: false,
+    }
+}
+
+pub fn format_diff_stat_summary(stats: &[DiffFileStat]) -> String {
+    if stats.is_empty() {
+        return String::new();
+    }
+
+    let max_len = stats.iter().map(|s| s.file_path.len()).max().unwrap_or(10);
+    let max_changes = stats.iter().map(|s| s.insertions + s.deletions).max().unwrap_or(1);
+    let bar_width = 30usize;
+
+    let mut out = String::new();
+    let mut total_ins = 0;
+    let mut total_del = 0;
+
+    for stat in stats {
+        total_ins += stat.insertions;
+        total_del += stat.deletions;
+
+        if stat.is_binary {
+            out.push_str(&format!(" {:<width$} | Bin\n", stat.file_path, width = max_len));
+            continue;
+        }
+
+        let changes = stat.insertions + stat.deletions;
+        let (plus_count, minus_count) = if max_changes > 0 {
+            let total_bar = ((changes as f64 / max_changes as f64) * (bar_width as f64)).ceil() as usize;
+            let total_bar = std::cmp::max(1, std::cmp::min(bar_width, total_bar));
+            let plus = ((stat.insertions as f64 / changes.max(1) as f64) * (total_bar as f64)).round() as usize;
+            let minus = total_bar.saturating_sub(plus);
+            (plus, minus)
+        } else {
+            (0, 0)
+        };
+
+        out.push_str(&format!(
+            " {:<width$} | {:>4} {}{}\n",
+            stat.file_path,
+            changes,
+            "+".repeat(plus_count),
+            "-".repeat(minus_count),
+            width = max_len
+        ));
+    }
+
+    let file_count = stats.len();
+    let file_suffix = if file_count == 1 { "file" } else { "files" };
+    let mut summary_parts = vec![format!("{} {} changed", file_count, file_suffix)];
+
+    if total_ins > 0 {
+        summary_parts.push(format!("{} insertion{}(+)", total_ins, if total_ins == 1 { "" } else { "s" }));
+    }
+    if total_del > 0 {
+        summary_parts.push(format!("{} deletion{}(-)", total_del, if total_del == 1 { "" } else { "s" }));
+    }
+
+    out.push_str(&format!(" {}\n", summary_parts.join(", ")));
+    out
+}
+
+pub fn colorize_unified_diff(diff: &str) -> String {
+    let mut out = String::with_capacity(diff.len() * 12 / 10);
+    for line in diff.lines() {
+        if line.starts_with("diff --git") || line.starts_with("index ") {
+            out.push_str("\x1b[1m");
+            out.push_str(line);
+            out.push_str("\x1b[0m\n");
+        } else if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("new file") || line.starts_with("deleted file") {
+            out.push_str("\x1b[1m");
+            out.push_str(line);
+            out.push_str("\x1b[0m\n");
+        } else if line.starts_with("@@ ") {
+            out.push_str("\x1b[36m");
+            out.push_str(line);
+            out.push_str("\x1b[0m\n");
+        } else if line.starts_with('+') {
+            out.push_str("\x1b[32m");
+            out.push_str(line);
+            out.push_str("\x1b[0m\n");
+        } else if line.starts_with('-') {
+            out.push_str("\x1b[31m");
+            out.push_str(line);
+            out.push_str("\x1b[0m\n");
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn pipe_to_command(cmd: &str, args: &[&str], input: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {}: {}", cmd, e))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+    }
+
+    let _ = child.wait();
+    Ok(())
+}
+
+fn pipe_to_custom_pager(pager_cmd_str: &str, input: &str) -> Result<(), String> {
+    let parts: Vec<&str> = pager_cmd_str.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("Empty pager command".to_string());
+    }
+    let cmd = parts[0];
+    let args = &parts[1..];
+    pipe_to_command(cmd, args, input)
+}
+
+pub fn output_diff_text(
+    diff_text: &str,
+    force_side_by_side: bool,
+    force_unified: bool,
+    no_pager: bool,
+    no_paging: bool,
+    paging: Option<&str>,
+    config_side_by_side: Option<bool>,
+    config_pager: Option<&str>,
+    config_paging: Option<&str>,
+) -> Result<(), String> {
+    use std::io::IsTerminal;
+    if diff_text.is_empty() {
+        return Ok(());
+    }
+
+    let is_tty = std::io::stdout().is_terminal();
+
+    if no_pager || !is_tty {
+        print!("{}", diff_text);
+        return Ok(());
+    }
+
+    let disable_paging = no_paging
+        || paging == Some("never")
+        || (paging.is_none() && config_paging == Some("never"));
+
+    let delta_available = is_command_in_path("delta");
+
+    let use_side_by_side = if force_unified {
+        false
+    } else if force_side_by_side {
+        true
+    } else if let Some(pref) = config_side_by_side {
+        pref
+    } else {
+        false
+    };
+
+    if delta_available {
+        let mut delta_args = Vec::new();
+        if use_side_by_side {
+            delta_args.push("--side-by-side".to_string());
+        }
+        if disable_paging {
+            delta_args.push("--paging=never".to_string());
+        } else if let Some(p) = paging {
+            delta_args.push(format!("--paging={}", p));
+        }
+        let delta_args_refs: Vec<&str> = delta_args.iter().map(|s| s.as_str()).collect();
+        if pipe_to_command("delta", &delta_args_refs, diff_text).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if disable_paging {
+        let colored = colorize_unified_diff(diff_text);
+        print!("{}", colored);
+        return Ok(());
+    }
+
+    if let Some(custom_pager) = config_pager {
+        if !custom_pager.is_empty() && pipe_to_custom_pager(custom_pager, diff_text).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if let Ok(git_pager) = std::env::var("GIT_PAGER") {
+        if !git_pager.is_empty() && pipe_to_custom_pager(&git_pager, diff_text).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if let Ok(git_core_pager) = run_git_cmd(Path::new("."), &["config", "core.pager"]) {
+        if !git_core_pager.trim().is_empty() && pipe_to_custom_pager(&git_core_pager, diff_text).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if let Ok(env_pager) = std::env::var("PAGER") {
+        if !env_pager.is_empty() && pipe_to_custom_pager(&env_pager, diff_text).is_ok() {
+            return Ok(());
+        }
+    }
+
+    if is_command_in_path("less") {
+        let colored = colorize_unified_diff(diff_text);
+        if pipe_to_command("less", &["-RFX"], &colored).is_ok() {
+            return Ok(());
+        }
+    }
+
+    let colored = colorize_unified_diff(diff_text);
+    print!("{}", colored);
+    Ok(())
+}
+
 /// Idempotently synchronizes the managed block in `.git/info/exclude`.
 /// Preserves any user-defined lines outside the managed block.
 pub fn sync_exclude_patterns(repo_root: &Path, raw_lines: &[String]) -> Result<(), String> {
