@@ -96,6 +96,7 @@ fn test_full_lifecycle_flow() {
     assert!(env.public_repo.join(".vaultignore").exists());
     let exclude = fs::read_to_string(env.public_repo.join(".git/info/exclude")).unwrap();
     assert!(exclude.contains("# >>> git-vault managed patterns >>>"));
+    assert!(exclude.contains(".vaultignore"));
     assert!(exclude.contains(".env"));
     assert!(exclude.contains("SPEC*.md"));
     assert!(exclude.contains("# <<< git-vault managed patterns <<<"));
