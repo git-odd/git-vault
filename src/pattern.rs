@@ -1,6 +1,6 @@
+use glob::{MatchOptions, Pattern};
 use std::fs;
 use std::path::Path;
-use glob::{MatchOptions, Pattern};
 
 pub const VAULTIGNORE_FILENAME: &str = ".vaultignore";
 

@@ -1,8 +1,14 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::manual_is_ascii_check
+)]
+
+mod commands;
 mod config;
 mod git;
 mod manifest;
 mod pattern;
-mod commands;
 
 use clap::{Parser, Subcommand};
 use std::process::exit;

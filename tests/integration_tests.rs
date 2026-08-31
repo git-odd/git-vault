@@ -40,9 +40,29 @@ impl TestEnv {
 
         // Init public git repo
         run_cmd(&public_repo, "git", &["init"], &[]);
-        run_cmd(&public_repo, "git", &["config", "user.name", "TestUser"], &[]);
-        run_cmd(&public_repo, "git", &["config", "user.email", "test@example.com"], &[]);
-        run_cmd(&public_repo, "git", &["remote", "add", "origin", "git@github.com:alice/demo-project.git"], &[]);
+        run_cmd(
+            &public_repo,
+            "git",
+            &["config", "user.name", "TestUser"],
+            &[],
+        );
+        run_cmd(
+            &public_repo,
+            "git",
+            &["config", "user.email", "test@example.com"],
+            &[],
+        );
+        run_cmd(
+            &public_repo,
+            "git",
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:alice/demo-project.git",
+            ],
+            &[],
+        );
 
         // Target debug binary path
         let mut bin_path = std::env::current_exe().unwrap();
@@ -50,7 +70,11 @@ impl TestEnv {
         if bin_path.ends_with("deps") {
             bin_path.pop();
         }
-        bin_path.push(if cfg!(windows) { "git-vault.exe" } else { "git-vault" });
+        bin_path.push(if cfg!(windows) {
+            "git-vault.exe"
+        } else {
+            "git-vault"
+        });
 
         Self {
             temp_dir,
@@ -66,7 +90,12 @@ impl TestEnv {
             ("USERPROFILE", vault_home_str.as_str()),
             ("HOME", vault_home_str.as_str()),
         ];
-        run_cmd(&self.public_repo, self.bin_path.to_str().unwrap(), args, &envs)
+        run_cmd(
+            &self.public_repo,
+            self.bin_path.to_str().unwrap(),
+            args,
+            &envs,
+        )
     }
 }
 
@@ -83,7 +112,12 @@ fn test_full_lifecycle_flow() {
     // 1. Create public files & commit
     fs::write(env.public_repo.join("main.rs"), "fn main() {}").unwrap();
     run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
-    run_cmd(&env.public_repo, "git", &["commit", "-m", "initial commit"], &[]);
+    run_cmd(
+        &env.public_repo,
+        "git",
+        &["commit", "-m", "initial commit"],
+        &[],
+    );
 
     // 2. Initialize git-vault
     let (ok, out, err) = env.run_vault(&["init"]);
@@ -105,7 +139,11 @@ fn test_full_lifecycle_flow() {
     fs::write(env.public_repo.join("SPEC.md"), "# Architecture Spec").unwrap();
     fs::write(env.public_repo.join(".env"), "SECRET_KEY=abc123xyz").unwrap();
     fs::create_dir_all(env.public_repo.join("docs/private")).unwrap();
-    fs::write(env.public_repo.join("docs/private/notes.md"), "Private Notes").unwrap();
+    fs::write(
+        env.public_repo.join("docs/private/notes.md"),
+        "Private Notes",
+    )
+    .unwrap();
     // Non-tracked example file that should be ignored by vault
     fs::write(env.public_repo.join(".env.example"), "SECRET_KEY=example").unwrap();
 
@@ -141,7 +179,10 @@ fn test_full_lifecycle_flow() {
     assert!(out.contains("Successfully restored snapshot"));
     assert!(env.public_repo.join("SPEC.md").exists());
     assert!(env.public_repo.join(".env").exists());
-    assert_eq!(fs::read_to_string(env.public_repo.join(".env")).unwrap(), "SECRET_KEY=abc123xyz");
+    assert_eq!(
+        fs::read_to_string(env.public_repo.join(".env")).unwrap(),
+        "SECRET_KEY=abc123xyz"
+    );
 
     // 8. Modify local private file and test pull conflict rejection
     fs::write(env.public_repo.join(".env"), "SECRET_KEY=modified_unpushed").unwrap();
@@ -159,12 +200,24 @@ fn test_full_lifecycle_flow() {
     let (ok, out, _) = env.run_vault(&["pull"]);
     assert!(ok);
     assert!(out.contains("ancestor, distance: 1"));
-    assert_eq!(fs::read_to_string(env.public_repo.join(".env")).unwrap(), "SECRET_KEY=abc123xyz");
+    assert_eq!(
+        fs::read_to_string(env.public_repo.join(".env")).unwrap(),
+        "SECRET_KEY=abc123xyz"
+    );
 
     // 10. Test empty snapshot (Commit 3 where no private assets are needed)
-    fs::write(env.public_repo.join("main.rs"), "fn main() { println!(\"v3\"); }").unwrap();
+    fs::write(
+        env.public_repo.join("main.rs"),
+        "fn main() { println!(\"v3\"); }",
+    )
+    .unwrap();
     run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
-    run_cmd(&env.public_repo, "git", &["commit", "-m", "commit 3 - private files decommissioned"], &[]);
+    run_cmd(
+        &env.public_repo,
+        "git",
+        &["commit", "-m", "commit 3 - private files decommissioned"],
+        &[],
+    );
 
     // Dehydrate and push empty snapshot on Commit 3
     env.run_vault(&["clean"]);
@@ -208,7 +261,12 @@ fn test_tracked_file_rejection_on_init() {
     // Track a .env file directly in public git
     fs::write(env.public_repo.join(".env"), "LEAKED_KEY=123").unwrap();
     run_cmd(&env.public_repo, "git", &["add", ".env"], &[]);
-    run_cmd(&env.public_repo, "git", &["commit", "-m", "mistaken commit with env"], &[]);
+    run_cmd(
+        &env.public_repo,
+        "git",
+        &["commit", "-m", "mistaken commit with env"],
+        &[],
+    );
 
     // Init should catch it and abort!
     let (ok, _, err) = env.run_vault(&["init"]);
@@ -307,7 +365,11 @@ fn test_diff_lifecycle_and_flags() {
     env.run_vault(&["init"]);
 
     // 2. Create private assets & push snapshot 1
-    fs::write(env.public_repo.join("SPEC.md"), "# Original Spec\nLine 1\nLine 2\n").unwrap();
+    fs::write(
+        env.public_repo.join("SPEC.md"),
+        "# Original Spec\nLine 1\nLine 2\n",
+    )
+    .unwrap();
     fs::write(env.public_repo.join(".env"), "SECRET=initial\n").unwrap();
     let (ok, _, _) = env.run_vault(&["push"]);
     assert!(ok);
@@ -318,7 +380,11 @@ fn test_diff_lifecycle_and_flags() {
     assert_eq!(out.trim(), "");
 
     // 4. Modify SPEC.md, add TODO.md, delete .env
-    fs::write(env.public_repo.join("SPEC.md"), "# Original Spec\nLine 1 Modified\nLine 2\nLine 3 Added\n").unwrap();
+    fs::write(
+        env.public_repo.join("SPEC.md"),
+        "# Original Spec\nLine 1 Modified\nLine 2\nLine 3 Added\n",
+    )
+    .unwrap();
     fs::write(env.public_repo.join("TODO.md"), "# TODO\n- Item 1\n").unwrap();
     fs::remove_file(env.public_repo.join(".env")).unwrap();
 
@@ -377,7 +443,11 @@ fn test_diff_between_two_snapshots() {
     env.run_vault(&["push"]);
 
     // Commit 2
-    fs::write(env.public_repo.join("main.rs"), "fn main() { println!(\"v2\"); }").unwrap();
+    fs::write(
+        env.public_repo.join("main.rs"),
+        "fn main() { println!(\"v2\"); }",
+    )
+    .unwrap();
     run_cmd(&env.public_repo, "git", &["add", "main.rs"], &[]);
     run_cmd(&env.public_repo, "git", &["commit", "-m", "commit 2"], &[]);
 

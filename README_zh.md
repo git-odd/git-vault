@@ -1,10 +1,19 @@
-# git-vault
+<div align="center">
 
-[English](README.md) | **简体中文**
-
----
+# 🔒 git-vault
 
 **面向开源独立开发者的无痕、Git SHA 锚定带外私有资产同步与 Hook 自动化 CLI。**
+
+[![Organization](https://img.shields.io/badge/Org-git--odd-blue?style=flat-square&logo=github)](https://github.com/git-odd)
+[![Suite](https://img.shields.io/badge/Suite-git--odd%20Ecosystem-purple?style=flat-square&logo=git)](https://github.com/git-odd)
+[![Crates.io](https://img.shields.io/crates/v/git-odd-vault.svg?style=flat-square&label=crates.io%20(git-odd-vault))](https://crates.io/crates/git-odd-vault)
+[![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-orange?style=flat-square)](LICENSE-MIT)
+
+[English](README.md) | [简体中文](README_zh.md)
+
+</div>
+
+> 隶属于 [**`git-odd`**](https://github.com/git-odd) 工具家族 — *用奇怪的方式解决 Git 奇怪的问题。*
 
 `git-vault` 将你的设计规格（`SPEC*.md`）、待办规划（`TODO*.md`）、AI 协作提示词（`AGENTS*.md`）以及本地私钥（`.env`）以明文形式独立保存在私有 Git 仓库中，并通过公开代码的 Commit SHA 自动实现版本时空对齐。
 
@@ -14,7 +23,7 @@
 
 ---
 
-### 💡 核心设计哲学
+## 💡 核心设计哲学
 
 * **带外物理级隔离（Out-of-band Isolation）**：公开仓库（MIT/AGPL 等）只存放纯净开源代码与测试用例。设计文档、TODO 与密钥存放在独立金库，物理级杜绝误提交、公开泄露与爬虫抓取。
 * **时空版本对齐（Git-Anchored Time Travel）**：公开代码库完全不知晓金库的存在。金库以公开 Commit SHA 为锚点，通过**第一父链祖先回溯算法**实现“代码切到旧版本，私有资产自动时空倒流”。
@@ -32,17 +41,33 @@
 
 ---
 
-### 📦 安装方式
+## 🚀 安装指南
+
+### 方式一：通过 Cargo 安装（推荐）
 
 ```bash
-cargo install git-vault
+cargo install git-odd-vault
 ```
+
+### 方式二：从 Git 仓库安装
+
+```bash
+cargo install --git https://github.com/git-odd/git-vault.git
+```
+
+### 方式三：从源码本地安装
+
+```bash
+cargo install --path .
+```
+
+确保 Cargo 二进制目录（`~/.cargo/bin`）已在系统 `PATH` 中。安装完成后即可在任意 Git 项目中使用 `git vault`。
 
 ---
 
-### 🚀 快速上手
+## 📖 快速上手
 
-#### 1. 配置并初始化（一键装配）
+### 1. 配置并初始化（一键装配）
 
 在公开代码仓库根目录下执行：
 
@@ -59,7 +84,7 @@ git vault init git@github.com:yourname/vault.git
 * 自动在 `.git/hooks/` 安装 `pre-push`、`post-checkout` 和 `post-merge` 钩子；
 * 准备本地金库缓存 `~/.vault/repo/`。
 
-#### 2. 无感开发流（推荐）
+### 2. 无感开发流（推荐）
 
 初始化完成后，你**无需手动执行任何 `git vault` 命令**：
 1. 像平常一样编写公开代码与私有资产（如 `SPEC.md`, `.env`）；
@@ -67,7 +92,7 @@ git vault init git@github.com:yourname/vault.git
 3. 推送公开代码：`git push origin main`（`pre-push` 钩子会自动将私有资产快照推到私有金库）；
 4. 切换分支：`git checkout dev`（`post-checkout` 钩子会自动从金库拉取对应版本的私有资产）。
 
-#### 3. 手动模式与常用命令
+### 3. 手动模式与常用命令
 
 若需手动维护或排查，可直接运行子命令：
 
@@ -100,7 +125,7 @@ git vault hook uninstall
 
 ---
 
-### 🔍 规则配置 (`.vaultignore`)
+## 🔍 规则配置 (`.vaultignore`)
 
 项目根目录的 `.vaultignore` 采用类似 `.gitignore` 的语法标准：
 
@@ -117,10 +142,11 @@ docs/private/**   # 专属私有文档目录
 !SPEC_public.md
 ```
 
-> **注**：`.vaultignore` 本身也会随每次快照一同备份到私有金库中，在全新机器上脱水复水时可 100% 完整自愈。
-
 ---
 
-### 📄 开源许可证
+## 📄 开源许可证
 
-本项目基于 [MIT License](LICENSE) 协议开源。
+本项目采用双许可证授权，您可以按需选择以下任一许可使用：
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) 或 <http://www.apache.org/licenses/LICENSE-2.0>)
+* MIT License ([LICENSE-MIT](LICENSE-MIT) 或 <http://opensource.org/licenses/MIT>)
+

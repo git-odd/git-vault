@@ -28,8 +28,8 @@ pub fn run_git_cmd(cwd: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 pub fn get_repo_root() -> Result<PathBuf, String> {
-    let current_dir = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+    let current_dir =
+        std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
     let root_str = run_git_cmd(&current_dir, &["rev-parse", "--show-toplevel"])
         .map_err(|_| "Not a git repository (or any of the parent directories).".to_string())?;
     Ok(PathBuf::from(root_str))
@@ -165,14 +165,25 @@ pub fn generate_file_diff(
     let null_target = "/dev/null";
 
     let (old_arg, new_arg, mode) = match (old_file, new_file) {
-        (Some(old_p), Some(new_p)) => (old_p.to_str().unwrap_or(""), new_p.to_str().unwrap_or(""), "modified"),
+        (Some(old_p), Some(new_p)) => (
+            old_p.to_str().unwrap_or(""),
+            new_p.to_str().unwrap_or(""),
+            "modified",
+        ),
         (None, Some(new_p)) => (null_target, new_p.to_str().unwrap_or(""), "new"),
         (Some(old_p), None) => (old_p.to_str().unwrap_or(""), null_target, "deleted"),
         (None, None) => return Ok(None),
     };
 
     let output = Command::new("git")
-        .args(["diff", "--no-index", "--color=never", "--", old_arg, new_arg])
+        .args([
+            "diff",
+            "--no-index",
+            "--color=never",
+            "--",
+            old_arg,
+            new_arg,
+        ])
         .output()
         .map_err(|e| format!("Failed to run git diff: {}", e))?;
 
@@ -261,7 +272,11 @@ pub fn format_diff_stat_summary(stats: &[DiffFileStat]) -> String {
     }
 
     let max_len = stats.iter().map(|s| s.file_path.len()).max().unwrap_or(10);
-    let max_changes = stats.iter().map(|s| s.insertions + s.deletions).max().unwrap_or(1);
+    let max_changes = stats
+        .iter()
+        .map(|s| s.insertions + s.deletions)
+        .max()
+        .unwrap_or(1);
     let bar_width = 30usize;
 
     let mut out = String::new();
@@ -273,15 +288,21 @@ pub fn format_diff_stat_summary(stats: &[DiffFileStat]) -> String {
         total_del += stat.deletions;
 
         if stat.is_binary {
-            out.push_str(&format!(" {:<width$} | Bin\n", stat.file_path, width = max_len));
+            out.push_str(&format!(
+                " {:<width$} | Bin\n",
+                stat.file_path,
+                width = max_len
+            ));
             continue;
         }
 
         let changes = stat.insertions + stat.deletions;
         let (plus_count, minus_count) = if max_changes > 0 {
-            let total_bar = ((changes as f64 / max_changes as f64) * (bar_width as f64)).ceil() as usize;
+            let total_bar =
+                ((changes as f64 / max_changes as f64) * (bar_width as f64)).ceil() as usize;
             let total_bar = std::cmp::max(1, std::cmp::min(bar_width, total_bar));
-            let plus = ((stat.insertions as f64 / changes.max(1) as f64) * (total_bar as f64)).round() as usize;
+            let plus = ((stat.insertions as f64 / changes.max(1) as f64) * (total_bar as f64))
+                .round() as usize;
             let minus = total_bar.saturating_sub(plus);
             (plus, minus)
         } else {
@@ -303,10 +324,18 @@ pub fn format_diff_stat_summary(stats: &[DiffFileStat]) -> String {
     let mut summary_parts = vec![format!("{} {} changed", file_count, file_suffix)];
 
     if total_ins > 0 {
-        summary_parts.push(format!("{} insertion{}(+)", total_ins, if total_ins == 1 { "" } else { "s" }));
+        summary_parts.push(format!(
+            "{} insertion{}(+)",
+            total_ins,
+            if total_ins == 1 { "" } else { "s" }
+        ));
     }
     if total_del > 0 {
-        summary_parts.push(format!("{} deletion{}(-)", total_del, if total_del == 1 { "" } else { "s" }));
+        summary_parts.push(format!(
+            "{} deletion{}(-)",
+            total_del,
+            if total_del == 1 { "" } else { "s" }
+        ));
     }
 
     out.push_str(&format!(" {}\n", summary_parts.join(", ")));
@@ -316,11 +345,13 @@ pub fn format_diff_stat_summary(stats: &[DiffFileStat]) -> String {
 pub fn colorize_unified_diff(diff: &str) -> String {
     let mut out = String::with_capacity(diff.len() * 12 / 10);
     for line in diff.lines() {
-        if line.starts_with("diff --git") || line.starts_with("index ") {
-            out.push_str("\x1b[1m");
-            out.push_str(line);
-            out.push_str("\x1b[0m\n");
-        } else if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("new file") || line.starts_with("deleted file") {
+        if line.starts_with("diff --git")
+            || line.starts_with("index ")
+            || line.starts_with("--- ")
+            || line.starts_with("+++ ")
+            || line.starts_with("new file")
+            || line.starts_with("deleted file")
+        {
             out.push_str("\x1b[1m");
             out.push_str(line);
             out.push_str("\x1b[0m\n");
@@ -405,10 +436,8 @@ pub fn output_diff_text(
         false
     } else if force_side_by_side {
         true
-    } else if let Some(pref) = config_side_by_side {
-        pref
     } else {
-        false
+        config_side_by_side.unwrap_or_default()
     };
 
     if delta_available {
@@ -446,7 +475,9 @@ pub fn output_diff_text(
     }
 
     if let Ok(git_core_pager) = run_git_cmd(Path::new("."), &["config", "core.pager"]) {
-        if !git_core_pager.trim().is_empty() && pipe_to_custom_pager(&git_core_pager, diff_text).is_ok() {
+        if !git_core_pager.trim().is_empty()
+            && pipe_to_custom_pager(&git_core_pager, diff_text).is_ok()
+        {
             return Ok(());
         }
     }
@@ -533,7 +564,6 @@ pub fn sync_exclude_patterns(repo_root: &Path, raw_lines: &[String]) -> Result<(
 
     Ok(())
 }
-
 
 pub fn install_hooks(repo_root: &Path) -> Result<Vec<String>, String> {
     let git_dir = repo_root.join(".git");
@@ -699,7 +729,8 @@ pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> R
     }
 
     if let Some(remote) = vault_remote {
-        let parent = vault_repo_dir.parent()
+        let parent = vault_repo_dir
+            .parent()
             .ok_or_else(|| "Invalid vault repo directory path".to_string())?;
         if !parent.exists() {
             fs::create_dir_all(parent)
@@ -720,8 +751,13 @@ pub fn ensure_vault_repo(vault_repo_dir: &Path, vault_remote: Option<&str>) -> R
     }
 
     // Fallback or local initialisation
-    fs::create_dir_all(vault_repo_dir)
-        .map_err(|e| format!("Failed to create directory {}: {}", vault_repo_dir.display(), e))?;
+    fs::create_dir_all(vault_repo_dir).map_err(|e| {
+        format!(
+            "Failed to create directory {}: {}",
+            vault_repo_dir.display(),
+            e
+        )
+    })?;
     run_git_cmd(vault_repo_dir, &["init"])?;
     ensure_vault_author_identity(vault_repo_dir);
 
@@ -753,7 +789,10 @@ pub fn sync_vault_fetch_rebase(vault_repo_dir: &Path) -> Result<(), String> {
 
     if !fetch_out.status.success() {
         let err = String::from_utf8_lossy(&fetch_out.stderr);
-        return Err(format!("Failed to fetch private vault from remote: {}", err.trim()));
+        return Err(format!(
+            "Failed to fetch private vault from remote: {}",
+            err.trim()
+        ));
     }
 
     // Check if HEAD exists in vault repo
@@ -782,7 +821,10 @@ pub fn sync_vault_fetch_rebase(vault_repo_dir: &Path) -> Result<(), String> {
                     .map_err(|e| format!("Failed to rebase vault: {}", e))?;
 
                 if !rebase_out.status.success() {
-                    let _ = Command::new("git").current_dir(vault_repo_dir).args(["rebase", "--abort"]).output();
+                    let _ = Command::new("git")
+                        .current_dir(vault_repo_dir)
+                        .args(["rebase", "--abort"])
+                        .output();
                     let err = String::from_utf8_lossy(&rebase_out.stderr);
                     return Err(format!(
                         "Conflict or failure while rebasing vault with {}: {}\nResolve manually at {}",
@@ -888,7 +930,8 @@ mod tests {
 
     #[test]
     fn test_managed_block_sync() {
-        let temp_dir = std::env::temp_dir().join(format!("test_vault_exclude_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_vault_exclude_{}", std::process::id()));
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(temp_dir.join(".git/info")).unwrap();
 

@@ -3,15 +3,15 @@ use std::path::Path;
 
 use crate::config::{get_vault_repo_dir, load_config, save_config};
 use crate::git::{
-    calculate_diff_stat, check_tracked_files, commit_and_push_vault, ensure_vault_repo,
-    format_diff_stat_summary, generate_file_diff, get_first_parent_ancestors, get_head_sha,
-    get_origin_url, get_repo_root, install_hooks, is_worktree_clean, output_diff_text,
-    parse_project_id, resolve_commit_sha, run_git_cmd, sync_exclude_patterns,
-    sync_vault_fetch_rebase, uninstall_hooks, DiffFileStat,
+    DiffFileStat, calculate_diff_stat, check_tracked_files, commit_and_push_vault,
+    ensure_vault_repo, format_diff_stat_summary, generate_file_diff, get_first_parent_ancestors,
+    get_head_sha, get_origin_url, get_repo_root, install_hooks, is_worktree_clean,
+    output_diff_text, parse_project_id, resolve_commit_sha, run_git_cmd, sync_exclude_patterns,
+    sync_vault_fetch_rebase, uninstall_hooks,
 };
 use crate::manifest::VaultManifest;
 use crate::pattern::{
-    ensure_vaultignore_file, load_vault_rules, scan_matching_files, VAULTIGNORE_FILENAME,
+    VAULTIGNORE_FILENAME, ensure_vaultignore_file, load_vault_rules, scan_matching_files,
 };
 
 pub fn cmd_init(vault_remote: Option<String>) -> Result<(), String> {
@@ -27,11 +27,15 @@ pub fn cmd_init(vault_remote: Option<String>) -> Result<(), String> {
     let candidates = scan_matching_files(&repo_root, &rules)?;
     let tracked = check_tracked_files(&repo_root, &candidates)?;
     if !tracked.is_empty() {
-        let mut msg = String::from("Error: The following candidate private file(s) are already tracked by public Git:\n");
+        let mut msg = String::from(
+            "Error: The following candidate private file(s) are already tracked by public Git:\n",
+        );
         for file in &tracked {
             msg.push_str(&format!("  • {}\n", file));
         }
-        msg.push_str("\ngit-vault will not protect files that are already part of public Git tracking.\n");
+        msg.push_str(
+            "\ngit-vault will not protect files that are already part of public Git tracking.\n",
+        );
         msg.push_str("Please remove them from Git tracking (e.g. 'git rm --cached <file>') before initializing git-vault.");
         return Err(msg);
     }
@@ -91,7 +95,8 @@ pub fn cmd_push() -> Result<(), String> {
     let candidates = scan_matching_files(&repo_root, &rules)?;
     let tracked = check_tracked_files(&repo_root, &candidates)?;
     if !tracked.is_empty() {
-        let mut msg = String::from("Error: The following private file(s) are tracked by public Git:\n");
+        let mut msg =
+            String::from("Error: The following private file(s) are tracked by public Git:\n");
         for file in &tracked {
             msg.push_str(&format!("  • {}\n", file));
         }
@@ -125,8 +130,9 @@ pub fn cmd_push() -> Result<(), String> {
         let dest_path = snapshot_dir.join(file);
         if let Some(parent) = dest_path.parent() {
             if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!("Failed to create directory {}: {}", parent.display(), e)
+                })?;
             }
         }
         fs::copy(&src_path, &dest_path)
@@ -147,7 +153,11 @@ pub fn cmd_push() -> Result<(), String> {
     // 5. Commit and push vault repo
     commit_and_push_vault(&vault_repo_dir, &project_id, &head_sha)?;
 
-    let short_sha = if head_sha.len() >= 7 { &head_sha[..7] } else { &head_sha };
+    let short_sha = if head_sha.len() >= 7 {
+        &head_sha[..7]
+    } else {
+        &head_sha
+    };
     println!(
         "Successfully pushed snapshot for {} ({} private files)",
         short_sha,
@@ -221,8 +231,9 @@ pub fn cmd_pull() -> Result<(), String> {
             let dest_path = repo_root.join(file);
             if let Some(parent) = dest_path.parent() {
                 if !parent.exists() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+                    fs::create_dir_all(parent).map_err(|e| {
+                        format!("Failed to create directory {}: {}", parent.display(), e)
+                    })?;
                 }
             }
             fs::copy(&src_path, &dest_path)
@@ -239,7 +250,11 @@ pub fn cmd_pull() -> Result<(), String> {
         let (_, updated_lines) = load_vault_rules(&repo_root);
         sync_exclude_patterns(&repo_root, &updated_lines)?;
 
-        let short_sha = if target_sha.len() >= 7 { &target_sha[..7] } else { &target_sha };
+        let short_sha = if target_sha.len() >= 7 {
+            &target_sha[..7]
+        } else {
+            &target_sha
+        };
         let match_desc = if distance == 0 {
             "exact match".to_string()
         } else {
@@ -262,8 +277,10 @@ pub fn cmd_pull() -> Result<(), String> {
                 files_match = false;
                 break;
             }
-            let local_content = fs::read(repo_root.join(file)).map_err(|e| format!("Failed to read {}: {}", file, e))?;
-            let target_content = fs::read(target_snapshot_dir.join(file)).map_err(|e| format!("Failed to read snapshot file {}: {}", file, e))?;
+            let local_content = fs::read(repo_root.join(file))
+                .map_err(|e| format!("Failed to read {}: {}", file, e))?;
+            let target_content = fs::read(target_snapshot_dir.join(file))
+                .map_err(|e| format!("Failed to read snapshot file {}: {}", file, e))?;
             if local_content != target_content {
                 files_match = false;
                 break;
@@ -272,13 +289,24 @@ pub fn cmd_pull() -> Result<(), String> {
     }
 
     if files_match {
-        let short_sha = if target_sha.len() >= 7 { &target_sha[..7] } else { &target_sha };
-        println!("Assets already aligned with target snapshot {} (no changes needed).", short_sha);
+        let short_sha = if target_sha.len() >= 7 {
+            &target_sha[..7]
+        } else {
+            &target_sha
+        };
+        println!(
+            "Assets already aligned with target snapshot {} (no changes needed).",
+            short_sha
+        );
         return Ok(());
     }
 
     // Divergent state: refuse to overwrite
-    let short_sha = if target_sha.len() >= 7 { &target_sha[..7] } else { &target_sha };
+    let short_sha = if target_sha.len() >= 7 {
+        &target_sha[..7]
+    } else {
+        &target_sha
+    };
     Err(format!(
         "Error: Local private assets differ from the target snapshot {}.\n\
          Run 'git vault push' to bind them to the current HEAD,\n\
@@ -368,12 +396,23 @@ pub fn cmd_status() -> Result<(), String> {
     let local_files = scan_matching_files(&repo_root, &rules)?;
 
     println!("Project:         {}", project_id);
-    println!("Public Worktree: {}", if is_clean { "clean" } else { "dirty (uncommitted changes present)" });
+    println!(
+        "Public Worktree: {}",
+        if is_clean {
+            "clean"
+        } else {
+            "dirty (uncommitted changes present)"
+        }
+    );
     println!("HEAD:            {}", head_sha);
 
     let target_desc = match &found_snapshot {
         Some((sha, _, 0)) => format!("{} (exact match)", &sha[..std::cmp::min(7, sha.len())]),
-        Some((sha, _, dist)) => format!("{} (ancestor, distance: {})", &sha[..std::cmp::min(7, sha.len())], dist),
+        Some((sha, _, dist)) => format!(
+            "{} (ancestor, distance: {})",
+            &sha[..std::cmp::min(7, sha.len())],
+            dist
+        ),
         None => "none (no snapshot in first-parent history)".to_string(),
     };
     println!("Target Snapshot: {}", target_desc);
@@ -432,7 +471,10 @@ pub fn cmd_status() -> Result<(), String> {
             if manifest.files.is_empty() {
                 "dehydrated (0 files)".to_string()
             } else {
-                format!("dehydrated (0 in workspace, {} in target snapshot)", manifest.files.len())
+                format!(
+                    "dehydrated (0 in workspace, {} in target snapshot)",
+                    manifest.files.len()
+                )
             }
         } else {
             "dehydrated (0 files)".to_string()
@@ -468,7 +510,10 @@ pub fn cmd_status() -> Result<(), String> {
 pub fn cmd_hook_install() -> Result<(), String> {
     let repo_root = get_repo_root()?;
     let installed = install_hooks(&repo_root)?;
-    println!("Successfully installed git-vault hooks: {}", installed.join(", "));
+    println!(
+        "Successfully installed git-vault hooks: {}",
+        installed.join(", ")
+    );
     Ok(())
 }
 
@@ -478,7 +523,10 @@ pub fn cmd_hook_uninstall() -> Result<(), String> {
     if uninstalled.is_empty() {
         println!("No git-vault hooks found to uninstall.");
     } else {
-        println!("Successfully uninstalled git-vault hooks: {}", uninstalled.join(", "));
+        println!(
+            "Successfully uninstalled git-vault hooks: {}",
+            uninstalled.join(", ")
+        );
     }
     Ok(())
 }
@@ -514,7 +562,7 @@ pub fn cmd_diff(
     let mut target_rev_a: Option<String> = None;
     let mut target_rev_b: Option<String> = None;
 
-    if let (Some(ref r_a), Some(ref r_b)) = (&revision, &revision_b) {
+    if let (Some(r_a), Some(r_b)) = (&revision, &revision_b) {
         let res_a = resolve_commit_sha(&repo_root, r_a);
         let res_b = resolve_commit_sha(&repo_root, r_b);
         match (res_a, res_b) {
@@ -553,14 +601,24 @@ pub fn cmd_diff(
         let snap_dir_b = project_snapshots_dir.join(sha_b);
 
         if !snap_dir_a.exists() {
-            return Err(format!("Snapshot for revision '{}' ({}) not found in vault.", revision.unwrap_or_default(), &sha_a[..std::cmp::min(7, sha_a.len())]));
+            return Err(format!(
+                "Snapshot for revision '{}' ({}) not found in vault.",
+                revision.unwrap_or_default(),
+                &sha_a[..std::cmp::min(7, sha_a.len())]
+            ));
         }
         if !snap_dir_b.exists() {
-            return Err(format!("Snapshot for revision '{}' ({}) not found in vault.", revision_b.unwrap_or_default(), &sha_b[..std::cmp::min(7, sha_b.len())]));
+            return Err(format!(
+                "Snapshot for revision '{}' ({}) not found in vault.",
+                revision_b.unwrap_or_default(),
+                &sha_b[..std::cmp::min(7, sha_b.len())]
+            ));
         }
 
-        let manifest_a = VaultManifest::load_from_dir(&snap_dir_a).unwrap_or_else(|_| VaultManifest::new(sha_a.clone(), Vec::new()));
-        let manifest_b = VaultManifest::load_from_dir(&snap_dir_b).unwrap_or_else(|_| VaultManifest::new(sha_b.clone(), Vec::new()));
+        let manifest_a = VaultManifest::load_from_dir(&snap_dir_a)
+            .unwrap_or_else(|_| VaultManifest::new(sha_a.clone(), Vec::new()));
+        let manifest_b = VaultManifest::load_from_dir(&snap_dir_b)
+            .unwrap_or_else(|_| VaultManifest::new(sha_b.clone(), Vec::new()));
 
         let mut all_files = std::collections::BTreeSet::new();
         for f in &manifest_a.files {
@@ -569,20 +627,34 @@ pub fn cmd_diff(
         for f in &manifest_b.files {
             all_files.insert(f.clone());
         }
-        if snap_dir_a.join(VAULTIGNORE_FILENAME).exists() || snap_dir_b.join(VAULTIGNORE_FILENAME).exists() {
+        if snap_dir_a.join(VAULTIGNORE_FILENAME).exists()
+            || snap_dir_b.join(VAULTIGNORE_FILENAME).exists()
+        {
             all_files.insert(VAULTIGNORE_FILENAME.to_string());
         }
 
         for file in all_files {
-            let old_path = if snap_dir_a.join(&file).exists() { Some(snap_dir_a.join(&file)) } else { None };
-            let new_path = if snap_dir_b.join(&file).exists() { Some(snap_dir_b.join(&file)) } else { None };
+            let old_path = if snap_dir_a.join(&file).exists() {
+                Some(snap_dir_a.join(&file))
+            } else {
+                None
+            };
+            let new_path = if snap_dir_b.join(&file).exists() {
+                Some(snap_dir_b.join(&file))
+            } else {
+                None
+            };
             file_pairs.push((file, old_path, new_path));
         }
     } else {
         let found_snapshot = if let Some(ref sha) = target_rev_a {
             let output = run_git_cmd(&repo_root, &["rev-list", "--first-parent", sha])
                 .map_err(|e| format!("Failed to resolve first-parent list for '{}': {}", sha, e))?;
-            let ancestors: Vec<String> = output.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+            let ancestors: Vec<String> = output
+                .lines()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
             let mut snap = None;
             for (dist, ancestor_sha) in ancestors.iter().enumerate() {
                 let snap_dir = project_snapshots_dir.join(ancestor_sha);
@@ -623,8 +695,15 @@ pub fn cmd_diff(
             }
         }
         let local_vaultignore = repo_root.join(VAULTIGNORE_FILENAME);
-        let snap_vaultignore = found_snapshot.as_ref().map(|(sha, _, _)| project_snapshots_dir.join(sha).join(VAULTIGNORE_FILENAME));
-        if local_vaultignore.exists() || snap_vaultignore.as_ref().map(|p| p.exists()).unwrap_or(false) {
+        let snap_vaultignore = found_snapshot
+            .as_ref()
+            .map(|(sha, _, _)| project_snapshots_dir.join(sha).join(VAULTIGNORE_FILENAME));
+        if local_vaultignore.exists()
+            || snap_vaultignore
+                .as_ref()
+                .map(|p| p.exists())
+                .unwrap_or(false)
+        {
             all_files.insert(VAULTIGNORE_FILENAME.to_string());
         }
 
@@ -644,7 +723,10 @@ pub fn cmd_diff(
     }
 
     if !paths.is_empty() {
-        let normalized_filters: Vec<String> = paths.iter().map(|p| p.replace('\\', "/").trim_end_matches('/').to_string()).collect();
+        let normalized_filters: Vec<String> = paths
+            .iter()
+            .map(|p| p.replace('\\', "/").trim_end_matches('/').to_string())
+            .collect();
         file_pairs.retain(|(file, _, _)| {
             let norm_file = file.replace('\\', "/");
             normalized_filters.iter().any(|filter| {
@@ -655,7 +737,9 @@ pub fn cmd_diff(
 
     let mut diff_results = Vec::new();
     for (rel_path, old_path, new_path) in file_pairs {
-        if let Ok(Some(diff_content)) = generate_file_diff(&rel_path, old_path.as_deref(), new_path.as_deref()) {
+        if let Ok(Some(diff_content)) =
+            generate_file_diff(&rel_path, old_path.as_deref(), new_path.as_deref())
+        {
             let status_tag = match (old_path.is_some(), new_path.is_some()) {
                 (true, true) => "M",
                 (false, true) => "A",

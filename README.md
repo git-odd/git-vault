@@ -1,10 +1,19 @@
-# git-vault
+<div align="center">
 
-**English** | [简体中文](README_zh-CN.md)
-
----
+# 🔒 git-vault
 
 **Zero-trace, Git-anchored out-of-band private asset manager & Git Hook automation CLI for open-source developers.**
+
+[![Organization](https://img.shields.io/badge/Org-git--odd-blue?style=flat-square&logo=github)](https://github.com/git-odd)
+[![Suite](https://img.shields.io/badge/Suite-git--odd%20Ecosystem-purple?style=flat-square&logo=git)](https://github.com/git-odd)
+[![Crates.io](https://img.shields.io/crates/v/git-odd-vault.svg?style=flat-square&label=crates.io%20(git-odd-vault))](https://crates.io/crates/git-odd-vault)
+[![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-orange?style=flat-square)](LICENSE-MIT)
+
+[English](README.md) | [简体中文](README_zh.md)
+
+</div>
+
+> Part of the [**`git-odd`**](https://github.com/git-odd) suite — *solving odd Git problems in odd ways.*
 
 `git-vault` keeps your private design specs (`SPEC*.md`), roadmaps (`TODO*.md`), AI agent guidelines (`AGENTS*.md`), and local secrets (`.env`) safely stored in a separate, private Git repository, while automatically aligning them with your public repository's commit history.
 
@@ -14,7 +23,7 @@ Installed as `git-vault`, it works seamlessly as a native Git subcommand: `git v
 
 ---
 
-### 💡 Core Design Philosophy
+## 💡 Core Design Philosophy
 
 * **Out-of-band Isolation**: Keep public repositories (MIT/AGPL) purely for code. Private specs and credentials live in your personal vault repo—preventing accidental commits, public exposure, and unwanted crawler scraping.
 * **Git-Anchored Time Travel**: The public repository has zero knowledge of the vault. The vault uses the public `HEAD` commit SHA as an anchor. When you check out an older commit, `git-vault` retrieves the corresponding private assets using **first-parent ancestor lookup**.
@@ -32,17 +41,33 @@ Installed as `git-vault`, it works seamlessly as a native Git subcommand: `git v
 
 ---
 
-### 📦 Installation
+## 🚀 Installation
+
+### Via Cargo (Recommended)
 
 ```bash
-cargo install git-vault
+cargo install git-odd-vault
 ```
+
+### From Git Repository
+
+```bash
+cargo install --git https://github.com/git-odd/git-vault.git
+```
+
+### From Local Source
+
+```bash
+cargo install --path .
+```
+
+Ensure `~/.cargo/bin` is in your system `PATH`. Once installed, `git vault` is ready to use in any Git repository.
 
 ---
 
-### 🚀 Quick Start
+## 📖 Quick Start
 
-#### 1. Configure and Initialize
+### 1. Configure and Initialize
 
 In your public Git repository:
 
@@ -59,7 +84,7 @@ This will:
 * Install automated Git hooks (`pre-push`, `post-checkout`, `post-merge`) in `.git/hooks/`.
 * Ensure local vault cache `~/.vault/repo/` is ready.
 
-#### 2. Seamless Daily Workflow
+### 2. Seamless Daily Workflow
 
 After initialization, you **don't need to manually run `git vault` commands**:
 1. Edit code and private assets (e.g. `SPEC.md`, `.env`);
@@ -67,7 +92,7 @@ After initialization, you **don't need to manually run `git vault` commands**:
 3. Push: `git push origin main` (`pre-push` hook snapshots and syncs private assets to your vault automatically);
 4. Switch branch: `git checkout dev` (`post-checkout` hook pulls and aligns the matching private snapshot).
 
-#### 3. Manual Inspection & Utilities
+### 3. Manual Inspection & Utilities
 
 ```bash
 # Snapshot workspace private assets and push to vault
@@ -98,7 +123,7 @@ git vault hook uninstall
 
 ---
 
-### 🔍 Rule Configuration (`.vaultignore`)
+## 🔍 Rule Configuration (`.vaultignore`)
 
 `.vaultignore` in your project root follows `.gitignore`-compatible syntax:
 
@@ -115,10 +140,11 @@ docs/private/**   # Dedicated private documentation folder
 !SPEC_public.md
 ```
 
-> **Note**: `.vaultignore` is also backed up inside each vault snapshot for 100% self-healing upon fresh clones or dehydration.
-
 ---
 
-### 📄 License
+## 📄 License
 
-Licensed under the [MIT License](LICENSE).
+Dual-licensed under either of:
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
